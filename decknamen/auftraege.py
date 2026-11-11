@@ -25,6 +25,11 @@ from .kern import Fund, TYPEN
 
 _ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
 
+# Beim Anonymisieren kommt immer dazu, was Personen auch ohne Namen erkennbar macht.
+KONTEXT_TYPEN = ["FUNKTION", "EINHEIT", "BESONDERS", "DATUM"]
+MODI = ("pseudonym", "anonym")
+ANONYM_HOECHSTENS_TAGE = 1
+
 
 class NichtGefunden(Exception):
     pass
@@ -54,7 +59,13 @@ class Ablage:
             raise KeyError(auftrag_id)
         return self.wurzel / auftrag_id
 
-    def neu(self, dateien: list[tuple[str, str]], typen: list[str], nachkontrolle: bool) -> dict:
+    def neu(self, dateien: list[tuple[str, str]], typen: list[str], nachkontrolle: bool,
+            modus: str = "pseudonym") -> dict:
+        if modus not in MODI:
+            raise ValueError(modus)
+        typen = [t for t in typen if t not in KONTEXT_TYPEN]
+        if modus == "anonym":
+            typen = typen + KONTEXT_TYPEN
         auftrag_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
         ordner = self._pfad(auftrag_id)
         _ordner(ordner)
@@ -64,8 +75,10 @@ class Ablage:
         a = {"id": auftrag_id, "erstellt": time.time(),
              "dateien": [{"name": n, "zeichen": len(t)} for n, t in dateien],
              "typen": [t for t in TYPEN if t in typen], "nachkontrolle": bool(nachkontrolle),
+             "modus": modus, "art": "erkennen",
              "stand": "wartet", "schritt": "In der Warteschlange", "anteil": 0.0,
-             "fehler": "", "modell": "", "funde": [], "dauer_s": None}
+             "fehler": "", "modell": "", "funde": [], "funde_stand": 0, "bericht": None,
+             "bericht_fehler": "", "dauer_s": None}
         self.speichern(a)
         return a
 
@@ -78,7 +91,11 @@ class Ablage:
         p = self._pfad(auftrag_id) / "auftrag.json"
         if not p.is_file():
             raise KeyError(auftrag_id)
-        return json.loads(p.read_text(encoding="utf-8"))
+        a = json.loads(p.read_text(encoding="utf-8"))
+        for k, v in (("modus", "pseudonym"), ("art", "erkennen"), ("funde_stand", 0),
+                     ("bericht", None), ("bericht_fehler", "")):
+            a.setdefault(k, v)
+        return a
 
     def texte(self, a: dict) -> list[str]:
         o = self._pfad(a["id"]) / "texte"
@@ -98,8 +115,10 @@ class Ablage:
         shutil.rmtree(self._pfad(auftrag_id), ignore_errors=True)
 
     def aufraeumen(self, tage: float) -> int:
-        grenze = time.time() - tage * 86400
-        alt = [a for a in self.alle() if a["erstellt"] < grenze and a["stand"] not in ("laeuft",)]
+        def grenze(a):
+            t = min(tage, ANONYM_HOECHSTENS_TAGE) if a["modus"] == "anonym" else tage
+            return time.time() - t * 86400
+        alt = [a for a in self.alle() if a["erstellt"] < grenze(a) and a["stand"] not in ("laeuft",)]
         for a in alt:
             self.loeschen(a["id"])
         return len(alt)
@@ -121,6 +140,7 @@ def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int
     a = ablage.laden(auftrag_id)
     texte = ablage.texte(a)
     typen = set(a["typen"])
+    anonym = a["modus"] == "anonym"
     beginn = time.time()
 
     def melden(**k):
@@ -137,14 +157,20 @@ def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int
             elif f.person and not alt.person:
                 alt.person = f.person
 
+    def abschliessen():
+        a["funde"] = _bereinigt(funde.values())
+        a["funde_stand"] += 1                  # der Restrisiko-Bericht merkt sich diesen Stand
+
     try:
+        abgeschlossen = False
         melden(stand="laeuft", schritt="Feste Muster: E-Mail, Telefon, IBAN", anteil=0.0, fehler="")
         for t in texte:
             dazu(regeln.finde(t, typen))
 
         if llm is not None and typen & set(erkennen.BESCHREIBUNG):
             # Im Zweck stehen nie Dateinamen: die enthalten oft selbst Namen.
-            zweck = f"Pseudonymisierung ({len(texte)} Datei{'en' if len(texte) != 1 else ''})"
+            zweck = (f"{'Anonymisierung' if anonym else 'Pseudonymisierung'} "
+                     f"({len(texte)} Datei{'en' if len(texte) != 1 else ''})")
             halten = belegung.halten(zweck, warten=lambda h: melden(stand="wartet", schritt=h)) \
                 if belegung else contextlib.nullcontext()
             with halten:
@@ -154,7 +180,7 @@ def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int
                 def frage(system, nutzer):
                     return llm.chat(system, nutzer, schema=erkennen.schema(modelltypen))
 
-                laeufe = 2 if a["nachkontrolle"] else 1
+                laeufe = (2 if a["nachkontrolle"] else 1) + (1 if anonym else 0)
                 je_datei = [len(erkennen.abschnitte(t, laenge)) for t in texte]
                 gesamt = max(1, sum(je_datei) * laeufe)
                 erledigt = 0
@@ -175,18 +201,69 @@ def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int
 
                 durchgang(texte, False)
                 if a["nachkontrolle"]:
-                    z = kern.zuordnen(list(funde.values()), texte)
+                    z = kern.zuordnen(list(funde.values()), texte, anrede_weg=anonym)
                     durchgang([kern.ersetzen(t, z) for t in texte], True)
+                abschliessen()
+                abgeschlossen = True
+                if anonym:
+                    _bericht(a, texte, llm, laenge, melden,
+                             lambda i: min(1.0, (erledigt + i) / gesamt))
 
-        bereinigt: dict[tuple[str, str], Fund] = {}
-        for f in kern._genitiv_abstreifen(list(funde.values())):
-            bereinigt.setdefault((f.text, f.typ), f)
-        melden(stand="pruefen", schritt="", anteil=1.0,
-               funde=[f.als_dict() for f in bereinigt.values()],
-               dauer_s=round(time.time() - beginn))
+        if not abgeschlossen:
+            abschliessen()
+        melden(stand="pruefen", schritt="", anteil=1.0, dauer_s=round(time.time() - beginn))
     except Exception as e:
         melden(stand="fehler", fehler=str(e)[:500] or type(e).__name__, schritt="",
                funde=[f.als_dict() for f in funde.values()])
+
+
+def _bereinigt(funde) -> list[dict]:
+    aus: dict[tuple[str, str], Fund] = {}
+    for f in kern._genitiv_abstreifen(list(funde)):
+        aus.setdefault((f.text, f.typ), f)
+    return [f.als_dict() for f in aus.values()]
+
+
+def _bericht(a: dict, texte: list[str], llm, laenge: int, melden, anteil=lambda i: 0.0) -> None:
+    """Restrisiko je Datei, auf dem fertig anonymisierten Text."""
+    z = kern.zuordnen(_funde(a), texte, anrede_weg=True)
+    hinweise, schon = [], 0
+
+    def frage(system, nutzer):
+        return llm.chat(system, nutzer, schema=erkennen.SCHEMA_BERICHT)
+
+    for k, t in enumerate(texte):
+        def fort(i, n, k=k):
+            melden(schritt=f"Restrisiko: Datei {k + 1} von {len(texte)}, Abschnitt {min(i + 1, n)} von {n}",
+                   anteil=anteil(schon + i))
+        for h in erkennen.restrisiko(kern.ersetzen(t, z), frage, laenge, fort):
+            hinweise.append({"datei": k, **h})
+        schon += len(erkennen.abschnitte(t, laenge))
+    a["bericht"] = {"erstellt": time.time(), "modell": llm.modell_name(),
+                    "stand": a["funde_stand"], "hinweise": hinweise}
+    a["bericht_fehler"] = ""
+
+
+def bericht_erstellen(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int = 4000) -> None:
+    """Nur den Restrisiko-Bericht neu erstellen, die Funde bleiben, wie sie sind."""
+    a = ablage.laden(auftrag_id)
+
+    def melden(**k):
+        a.update(k)
+        ablage.speichern(a)
+
+    try:
+        melden(stand="laeuft", schritt="Restrisiko wird geprüft", anteil=0.0, bericht_fehler="")
+        halten = belegung.halten("Restrisiko-Prüfung", warten=lambda h: melden(stand="wartet", schritt=h)) \
+            if belegung else contextlib.nullcontext()
+        with halten:
+            melden(stand="laeuft")
+            texte = ablage.texte(a)
+            gesamt = max(1, sum(len(erkennen.abschnitte(t, laenge)) for t in texte))
+            _bericht(a, texte, llm, laenge, melden, lambda i: min(1.0, i / gesamt))
+    except Exception as e:
+        a["bericht_fehler"] = str(e)[:500] or type(e).__name__
+    melden(stand="pruefen", schritt="", anteil=1.0, art="erkennen")
 
 
 class Werkstatt:
@@ -199,12 +276,12 @@ class Werkstatt:
         self.schlange: queue.Queue[str] = queue.Queue()
         for a in reversed(ablage.alle()):            # nach einem Neustart weitermachen
             if a["stand"] in ("wartet", "laeuft"):
-                self.einreihen(a["id"])
+                self.einreihen(a["id"], a["art"])
         threading.Thread(target=self._arbeiten, daemon=True).start()
 
-    def einreihen(self, auftrag_id: str) -> None:
+    def einreihen(self, auftrag_id: str, art: str = "erkennen") -> None:
         a = self.ablage.laden(auftrag_id)
-        a.update(stand="wartet", schritt="In der Warteschlange", anteil=0.0, fehler="")
+        a.update(stand="wartet", schritt="In der Warteschlange", anteil=0.0, fehler="", art=art)
         self.ablage.speichern(a)
         self.schlange.put(auftrag_id)
 
@@ -223,7 +300,10 @@ class Werkstatt:
                 self.ablage.speichern(a)
                 continue
             try:
-                verarbeiten(self.ablage, auftrag_id, llm, self.belegung, self.laenge)
+                if self.ablage.laden(auftrag_id)["art"] == "bericht":
+                    bericht_erstellen(self.ablage, auftrag_id, llm, self.belegung, self.laenge)
+                else:
+                    verarbeiten(self.ablage, auftrag_id, llm, self.belegung, self.laenge)
             except Exception:
                 traceback.print_exc()
 
@@ -235,7 +315,7 @@ def _funde(a: dict) -> list[Fund]:
 
 
 def zuordnung_von(ablage: Ablage, a: dict) -> kern.Zuordnung:
-    return kern.zuordnen(_funde(a), ablage.texte(a))
+    return kern.zuordnen(_funde(a), ablage.texte(a), anrede_weg=a["modus"] == "anonym")
 
 
 def _dateiname(name: str, z: kern.Zuordnung) -> str:
@@ -267,11 +347,15 @@ def ergebnisse(ablage: Ablage, a: dict) -> list[tuple[str, str]]:
 def funde_setzen(ablage: Ablage, a: dict, aktiv: set[int]) -> None:
     for i, f in enumerate(a["funde"]):
         f["aktiv"] = i in aktiv
+    a["funde_stand"] += 1
     ablage.speichern(a)
 
 
-def fund_hinzufuegen(ablage: Ablage, a: dict, text: str, typ: str, person: str) -> None:
-    text, person = text.strip(), person.strip()
+def fund_hinzufuegen(ablage: Ablage, a: dict, text: str, typ: str, person: str,
+                     ersatz: str = "") -> None:
+    text, person, ersatz = text.strip(), person.strip(), ersatz.strip()
+    if typ not in kern.ERSATZ_TYPEN:
+        ersatz = ""
     if typ not in TYPEN or not text:
         raise NichtGefunden("Bitte einen Begriff und eine Art angeben.")
     if kern.PLATZHALTER.search(text):
@@ -283,14 +367,68 @@ def fund_hinzufuegen(ablage: Ablage, a: dict, text: str, typ: str, person: str) 
             f["aktiv"] = True
             if person:
                 f["person"] = person
+            if ersatz:
+                f["ersatz"] = ersatz
             break
     else:
         a["funde"].append(Fund(text, typ, person=person if typ == "PERSON" else "",
-                               quelle="manuell").als_dict())
+                               quelle="manuell", ersatz=ersatz).als_dict())
+    a["funde_stand"] += 1
     ablage.speichern(a)
 
 
 def zuordnung_export(a: dict, ablage: Ablage) -> dict:
+    if a["modus"] == "anonym":
+        raise PermissionError("Beim Anonymisieren gibt es keine Zuordnung.")
     z = zuordnung_von(ablage, a)
     return {g.platzhalter: {"typ": g.typ, "steht_fuer": g.anzeige, "schreibweisen": g.formen}
             for g in z.gruppen}
+
+
+def bericht_markdown(ablage: Ablage, a: dict) -> str:
+    """Der Restrisiko-Bericht zum Mitgeben. Enthält nur anonymisierten Text."""
+    b = a.get("bericht") or {}
+    z = zuordnung_von(ablage, a)
+    namen = [n for n, _ in ergebnisse(ablage, a)]
+    zahl = kern.zaehlen(ablage.texte(a), z)
+    platz: dict[str, int] = {}
+    verallg: dict[str, int] = {}
+    for g in z.gruppen:
+        if g.ersatz:
+            verallg[g.typ] = verallg.get(g.typ, 0) + sum(zahl.get(f, 0) for f in g.formen)
+        else:
+            platz[g.typ] = platz.get(g.typ, 0) + 1
+    zeilen = [
+        "# Restrisiko-Bericht", "",
+        f"Erstellt am {time.strftime('%d.%m.%Y um %H:%M', time.localtime(b.get('erstellt', time.time())))} "
+        f"mit dem lokalen Modell {b.get('modell') or a.get('modell') or 'unbekannt'}.", "",
+        "Dieser Bericht ist eine automatische Prüfung durch ein Sprachmodell. Er ersetzt nicht die "
+        "Prüfung durch einen Menschen und ist keine Bestätigung, dass die Texte anonym im Sinne der "
+        "DSGVO sind.", "",
+    ]
+    if b and b.get("stand") != a["funde_stand"]:
+        zeilen += ["**Achtung:** Der Bericht stammt von vor den letzten Änderungen an den Funden.", ""]
+    zeilen += ["## Was ersetzt wurde", "", f"- Dateien: {', '.join(namen)}"]
+    if platz:
+        zeilen.append("- Platzhalter: " + ", ".join(f"{n}× {TYPEN[t]}" for t, n in platz.items()))
+    if verallg:
+        wort = {"DATUM": ("Datumsangabe", "Datumsangaben"),
+                "BESONDERS": ("besondere Angabe", "besondere Angaben")}
+        zeilen.append("- Verallgemeinert: " + ", ".join(
+            f"{n} {wort[t][n != 1]}" for t, n in verallg.items()))
+    zeilen += ["- Anreden und Titel vor Namen entfernt",
+               f"- Keine Zuordnung abrufbar, der Auftrag wird spätestens nach "
+               f"{ANONYM_HOECHSTENS_TAGE} Tag gelöscht", "", "## Hinweise des Modells", ""]
+    hinweise = b.get("hinweise", [])
+    if not hinweise:
+        zeilen += ["Das Modell hat keine Stellen gefunden, an denen Personen erkennbar bleiben. "
+                   "Das ist kein Beweis, dass es keine gibt.", ""]
+    for k, name in enumerate(namen):
+        eigene = [h for h in hinweise if h["datei"] == k]
+        if not eigene:
+            continue
+        zeilen += [f"### {name}", ""]
+        for i, h in enumerate(eigene, 1):
+            zeilen += [f"{i}. „{h['stelle']}“" + ("" if h["gefunden"] else " (nicht wörtlich im Text)"),
+                       f"   Grund: {h['grund']}", f"   Vorschlag: {h['vorschlag']}", ""]
+    return "\n".join(zeilen).rstrip() + "\n"

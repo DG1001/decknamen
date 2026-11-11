@@ -108,3 +108,28 @@ def test_kuerzel_ohne_zuordnung_geht_an_den_einzigen_passenden_namen():
     text = "Thomas Wagner und Anna Roth. Aufgabe: TW"
     z = _z([Fund("Thomas Wagner", "PERSON"), Fund("Anna Roth", "PERSON"), Fund("TW", "PERSON")], text)
     assert ersetzen(text, z) == "[Person 1] und [Person 2]. Aufgabe: [Person 1]"
+
+
+def test_ersatz_statt_nummer_fuer_datum_und_besondere_angaben():
+    text = "Anna ist bis 31.10. krankgeschrieben, Paul seit 1.11. schwanger."
+    z = _z([Fund("Anna", "PERSON"), Fund("Paul", "PERSON"),
+            Fund("31.10.", "DATUM", ersatz="Ende Oktober"), Fund("1.11.", "DATUM", ersatz="Anfang November"),
+            Fund("krankgeschrieben", "BESONDERS", ersatz="abwesend"), Fund("schwanger", "BESONDERS")], text)
+    assert ersetzen(text, z) == ("[Person 1] ist bis Ende Oktober abwesend, "
+                                 "[Person 2] seit Anfang November [besondere Angabe].")
+
+
+def test_ersatzformulierungen_werden_nicht_zurueckuebersetzt():
+    text = "Anna ist krankgeschrieben."
+    z = _z([Fund("Anna", "PERSON"), Fund("krankgeschrieben", "BESONDERS", ersatz="abwesend")], text)
+    assert zurueck("[Person 1] ist abwesend.", z) == "Anna ist abwesend."
+
+
+def test_anrede_und_titel_fallen_beim_anonymisieren_weg():
+    text = "Frau Dr. Yıldız rechnet, Herrn Kochs Team hilft, Prof. Weber schaut zu, Frau Koch auch."
+    funde = [Fund("Yıldız", "PERSON"), Fund("Koch", "PERSON"), Fund("Weber", "PERSON")]
+    z = zuordnen(funde, [text], anrede_weg=True)
+    assert ersetzen(text, z) == ("[Person 1] rechnet, [Person 2]s Team hilft, "
+                                 "[Person 3] schaut zu, [Person 2] auch.")
+    assert zaehlen([text], z) == {"Yıldız": 1, "Koch": 2, "Weber": 1}
+    assert ersetzen(text, zuordnen(funde, [text])).startswith("Frau Dr. [Person 1]")

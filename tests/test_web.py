@@ -6,18 +6,23 @@ import zipfile
 
 import pytest
 
-from decknamen.auftraege import Ablage, verarbeiten
+from decknamen.auftraege import Ablage, verarbeiten, bericht_erstellen
 from decknamen.web import app_bauen
 
-from test_auftraege import FalschesLLM
+from test_auftraege import FalschesLLM, AnonymLLM, ANONYM
 
 
 class SofortWerkstatt:
     def __init__(self, ablage, llm):
         self.ablage, self.llm = ablage, llm
+        self.auftraege = []
 
-    def einreihen(self, auftrag_id):
-        verarbeiten(self.ablage, auftrag_id, self.llm)
+    def einreihen(self, auftrag_id, art="erkennen"):
+        self.auftraege.append(art)
+        if art == "bericht":
+            bericht_erstellen(self.ablage, auftrag_id, self.llm)
+        else:
+            verarbeiten(self.ablage, auftrag_id, self.llm)
 
 
 TEXT = "# Protokoll\n\nAnna Müller eröffnet. Müller bittet Peter Koch um Rückmeldung an a.m@firma.de.\n"
@@ -148,3 +153,55 @@ def test_passwortschutz(tmp_path):
     assert c.get("/", headers={"Authorization": f"Basic {gut}"}).status_code == 200
     falsch = base64.b64encode(b"egal:falsch").decode()
     assert c.get("/", headers={"Authorization": f"Basic {falsch}"}).status_code == 401
+
+
+@pytest.fixture
+def anonym(tmp_path):
+    ablage = Ablage(tmp_path / "daten")
+    werkstatt = SofortWerkstatt(ablage, AnonymLLM())
+    app = app_bauen(ablage, werkstatt,
+                    lambda: {"basis": "http://127.0.0.1:8889/v1", "modell": "falsch-7b", "fehler": ""})
+    c = app.test_client()
+    aid = _auftrag_id(_hochladen(c, inhalt=ANONYM, modus="anonym"))
+    return c, ablage, aid, werkstatt
+
+
+def test_anonymisieren_ueber_die_oberflaeche(anonym):
+    c, ablage, aid, _ = anonym
+    assert ablage.laden(aid)["modus"] == "anonym"
+    seite = c.get(f"/auftrag/{aid}").get_data(as_text=True)
+    assert "Restrisiko" in seite and "einzige Frau im Team" in seite
+    assert "zuordnung.json" not in seite and "/zurueck" not in seite
+    text = c.get(f"/auftrag/{aid}/datei/0").get_data(as_text=True)
+    assert "[Funktion 1]" in text and "abwesend" in text and "Frau Dr." not in text
+
+
+def test_anonym_ohne_zuordnung_und_zurueckuebersetzen(anonym):
+    c, _, aid, _ = anonym
+    assert c.get(f"/auftrag/{aid}/zuordnung.json").status_code == 404
+    assert c.get(f"/auftrag/{aid}/zurueck").status_code == 404
+    assert c.post(f"/auftrag/{aid}/zurueck", data={"text": "[Person 1]"}).status_code == 404
+
+
+def test_restrisiko_bericht_herunterladen_und_im_zip(anonym):
+    c, _, aid, _ = anonym
+    md = c.get(f"/auftrag/{aid}/restrisiko.md").get_data(as_text=True)
+    assert md.startswith("# Restrisiko-Bericht") and "einzige Frau im Team" in md
+    z = zipfile.ZipFile(io.BytesIO(c.get(f"/auftrag/{aid}/alle.zip").data))
+    assert sorted(z.namelist()) == ["Protokoll.md", "restrisiko.md"]
+
+
+def test_bericht_nach_aenderung_veraltet_und_neu(anonym):
+    c, ablage, aid, werkstatt = anonym
+    alle = [str(i) for i in range(len(ablage.laden(aid)["funde"]))]
+    c.post(f"/auftrag/{aid}/funde", data={"aktiv": alle})
+    assert "vor den letzten Änderungen" in c.get(f"/auftrag/{aid}").get_data(as_text=True)
+    assert c.post(f"/auftrag/{aid}/bericht").status_code == 303
+    assert werkstatt.auftraege[-1] == "bericht"
+    assert "vor den letzten Änderungen" not in c.get(f"/auftrag/{aid}").get_data(as_text=True)
+
+
+def test_pseudonym_hat_keinen_restrisiko_bericht(umgebung):
+    c, _ = umgebung
+    aid = _auftrag_id(_hochladen(c))
+    assert c.get(f"/auftrag/{aid}/restrisiko.md").status_code == 404

@@ -35,6 +35,13 @@ ARTEN = [
     ("FIRMA", "Firmen und Organisationen", "Kunden, Lieferanten, Partner"),
     ("ORT", "Orte", "Städte, Standorte"),
 ]
+# Kommen beim Anonymisieren immer dazu (zum Ergänzen von Hand wählbar).
+KONTEXT_ARTEN = [
+    ("FUNKTION", "Funktionen und Rollen", "„Leiterin Vertrieb Süd“"),
+    ("EINHEIT", "Abteilungen und Teams", ""),
+    ("BESONDERS", "Besondere Angaben", "Gesundheit, Religion, Abmahnungen …"),
+    ("DATUM", "Datumsangaben", "werden auf Anfang, Mitte oder Ende des Monats verallgemeinert"),
+]
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -42,10 +49,11 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' 
 
 def vorschau(text: str, z: kern.Zuordnung, modus: str) -> Markup:
     typ_von = {g.platzhalter: g.typ for g in z.gruppen}
+    ersatz = {g.platzhalter for g in z.gruppen if g.ersatz}
     aus, pos = [], 0
     for anfang, ende, form, ph in kern.stellen(text, z):
         aus.append(escape(text[pos:anfang]))
-        klasse = "t-" + typ_von.get(ph, "SONSTIGES").lower()
+        klasse = "t-" + typ_von.get(ph, "SONSTIGES").lower() + (" ersatz" if ph in ersatz else "")
         if modus == "original":
             aus.append(Markup('<mark class="fund {}" title="{}">{}</mark>').format(klasse, ph, form))
         else:
@@ -103,6 +111,7 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
 
     def startseite(fehler=None, code=200):
         return render_template("start.html", auftraege=ablage.alle(), arten=ARTEN,
+                               kontext_arten=KONTEXT_ARTEN,
                                vorgewaehlt=VORGEWAEHLT, endungen=", ".join(ENDUNGEN),
                                fehler=fehler or [], tage=aufbewahrung_tage), code
 
@@ -127,7 +136,10 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
                 fehler.append(str(e))
         if fehler:
             return startseite(fehler, 400)
-        a = ablage.neu(gelesen, typen, bool(request.form.get("nachkontrolle")))
+        modus = request.form.get("modus", "pseudonym")
+        if modus not in auftraege.MODI:
+            modus = "pseudonym"
+        a = ablage.neu(gelesen, typen, bool(request.form.get("nachkontrolle")), modus=modus)
         werkstatt.einreihen(a["id"])
         return redirect(url_for("auftrag", auftrag_id=a["id"]), 303)
 
@@ -139,7 +151,7 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
         if a["stand"] != "pruefen":
             return render_template("lauf.html", a=a)
         texte = ablage.texte(a)
-        z = kern.zuordnen([kern.Fund.aus_dict(d) for d in a["funde"]], texte)
+        z = auftraege.zuordnung_von(ablage, a)
         zahl = kern.zaehlen(texte, z)
         index = {(f["text"], f["typ"]): i for i, f in enumerate(a["funde"])}
         gruppen = []
@@ -152,7 +164,8 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
                 f = a["funde"][i]
                 formen.append({"i": i, "text": form, "zahl": zahl.get(form, 0),
                                "quelle": QUELLEN.get(f["quelle"], f["quelle"])})
-            gruppen.append({"ph": g.platzhalter, "typ": g.typ, "anzeige": g.anzeige, "formen": formen})
+            gruppen.append({"ph": g.platzhalter, "typ": g.typ, "anzeige": g.anzeige, "formen": formen,
+                            "ersatz": g.ersatz})
         aus = {i for g in gruppen for f in g["formen"] for i in [f["i"]]}
         uebrige = [{"i": i, "text": f["text"], "typ": f["typ"],
                     "quelle": QUELLEN.get(f["quelle"], f["quelle"])}
@@ -160,10 +173,14 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
         namen = [n for n, _ in auftraege.ergebnisse(ablage, a)]
         nr = min(max(request.args.get("datei", 0, type=int), 0), len(texte) - 1)
         personen = [g for g in gruppen if g["typ"] == "PERSON"]
+        anonym = a["modus"] == "anonym"
+        bericht = a.get("bericht")
         return render_template(
             "pruefen.html", a=a, gruppen=gruppen, uebrige=uebrige, namen=namen, nr=nr,
             ergebnis=vorschau(texte[nr], z, "ergebnis"), original=vorschau(texte[nr], z, "original"),
-            ersetzungen=sum(zahl.values()), personen=personen, arten=ARTEN,
+            ersetzungen=sum(zahl.values()), personen=personen,
+            arten=ARTEN + (KONTEXT_ARTEN if anonym else []), anonym=anonym, bericht=bericht,
+            bericht_veraltet=bool(bericht) and bericht.get("stand") != a["funde_stand"],
             meldung=request.args.get("meldung", ""))
 
     @app.get("/auftrag/<auftrag_id>/stand")
@@ -182,7 +199,8 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
         if neu_text:
             try:
                 auftraege.fund_hinzufuegen(ablage, a, neu_text, request.form.get("neu_typ", "PERSON"),
-                                           request.form.get("neu_person", ""))
+                                           request.form.get("neu_person", ""),
+                                           request.form.get("neu_ersatz", ""))
             except auftraege.NichtGefunden as e:
                 meldung = str(e)
         return redirect(url_for("auftrag", auftrag_id=auftrag_id, datei=nr, meldung=meldung or None)
@@ -192,6 +210,14 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
     def nochmal(auftrag_id):
         laden(auftrag_id)
         werkstatt.einreihen(auftrag_id)
+        return redirect(url_for("auftrag", auftrag_id=auftrag_id), 303)
+
+    @app.post("/auftrag/<auftrag_id>/bericht")
+    def bericht_neu(auftrag_id):
+        a = laden(auftrag_id)
+        if a["modus"] != "anonym" or a["stand"] != "pruefen":
+            abort(404)
+        werkstatt.einreihen(auftrag_id, "bericht")
         return redirect(url_for("auftrag", auftrag_id=auftrag_id), 303)
 
     @app.post("/auftrag/<auftrag_id>/loeschen")
@@ -222,11 +248,23 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
         with zipfile.ZipFile(puffer, "w", zipfile.ZIP_DEFLATED) as z:
             for name, text in auftraege.ergebnisse(ablage, a):
                 z.writestr(name, text)
+            if a["modus"] == "anonym" and a.get("bericht"):
+                z.writestr("restrisiko.md", auftraege.bericht_markdown(ablage, a))
         return _herunterladen(puffer.getvalue(), f"pseudonymisiert-{auftrag_id}.zip", "application/zip")
+
+    @app.get("/auftrag/<auftrag_id>/restrisiko.md")
+    def restrisiko(auftrag_id):
+        a = laden(auftrag_id)
+        if a["modus"] != "anonym" or not a.get("bericht") or a["stand"] != "pruefen":
+            abort(404)
+        return _herunterladen(auftraege.bericht_markdown(ablage, a).encode(),
+                              f"restrisiko-{auftrag_id}.md", "text/markdown; charset=utf-8")
 
     @app.get("/auftrag/<auftrag_id>/zuordnung.json")
     def zuordnung(auftrag_id):
         a = laden(auftrag_id)
+        if a["modus"] == "anonym":
+            abort(404)
         d = auftraege.zuordnung_export(a, ablage)
         return _herunterladen(json.dumps(d, ensure_ascii=False, indent=2).encode(),
                               f"zuordnung-{auftrag_id}.json", "application/json")
@@ -234,6 +272,8 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
     @app.route("/auftrag/<auftrag_id>/zurueck", methods=["GET", "POST"])
     def zurueck(auftrag_id):
         a = laden(auftrag_id)
+        if a["modus"] == "anonym":
+            abort(404)
         eingabe = request.form.get("text", "")
         ausgabe = kern.zurueck(eingabe, auftraege.zuordnung_von(ablage, a)) if eingabe else ""
         return render_template("zurueck.html", a=a, eingabe=eingabe, ausgabe=ausgabe)

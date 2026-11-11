@@ -25,6 +25,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Der Knopf sagt, was passiert.
+  const los = document.getElementById("los");
+  document.querySelectorAll('input[name="modus"]').forEach((r) => {
+    r.addEventListener("change", () => {
+      if (los && r.checked) los.textContent = r.value === "anonym" ? "Anonymisieren" : "Pseudonymisieren";
+    });
+  });
+
   // Laufender Auftrag: Stand abfragen, bei Ende neu laden.
   const lauf = document.getElementById("lauf");
   if (lauf && ["wartet", "laeuft"].includes(lauf.dataset.stand)) {

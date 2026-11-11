@@ -2,7 +2,7 @@
 {% block titel %}{{ 'Fehler' if a.stand == 'fehler' else 'Läuft' }}: decknamen{% endblock %}
 {% block inhalt %}
 <section class="lauf" id="lauf" data-stand-url="{{ url_for('stand', auftrag_id=a.id) }}" data-stand="{{ a.stand }}">
-  <h1>{% if a.stand == 'fehler' %}Abgebrochen{% elif a.stand == 'wartet' %}Wartet{% else %}Wird durchgesehen{% endif %}</h1>
+  <h1>{% if a.stand == 'fehler' %}Abgebrochen{% elif a.stand == 'wartet' %}Wartet{% elif a.art == 'bericht' %}Restrisiko wird geprüft{% else %}Wird durchgesehen{% endif %}</h1>
   <p class="grau">{{ a.dateien | map(attribute='name') | join(', ') }}</p>
 
   {% if a.stand == 'fehler' %}

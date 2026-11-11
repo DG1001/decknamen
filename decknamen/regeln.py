@@ -1,4 +1,4 @@
-"""Feste Muster: E-Mail, Telefon, IBAN.
+"""Feste Muster: E-Mail, Telefon, IBAN und (beim Anonymisieren) Datumsangaben.
 
 Was sich zuverlässig an der Form erkennen lässt, braucht kein Sprachmodell.
 Die Regeln laufen vor dem Modell und unabhängig davon -- fällt das Modell
@@ -49,6 +49,62 @@ def _iban(text: str):
             kandidat = kandidat.rsplit(" ", 1)[0]
 
 
+MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August",
+          "September", "Oktober", "November", "Dezember"]
+
+_DATUM_WORT = re.compile(r"(?<![\w.])(\d{1,2})\.\s?(%s)(?:\s+(\d{4}))?(?!\w)" % "|".join(MONATE))
+_DATUM_PUNKT = re.compile(r"(?<![\w.])(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})?(?![\w.])")
+_DATUM_ISO = re.compile(r"(?<![\w-])(\d{4})-(\d{2})-(\d{2})(?![\w-])")
+_ZEILENANFANG = re.compile(r"(?:^|\n)[ \t#>*-]*$")
+
+
+def _verallgemeinert(tag: int, monat: int, jahr: str | None) -> str | None:
+    if not (1 <= tag <= 31 and 1 <= monat <= 12):
+        return None
+    drittel = "Anfang" if tag <= 10 else "Mitte" if tag <= 20 else "Ende"
+    if jahr and len(jahr) == 2:
+        jahr = "20" + jahr
+    return f"{drittel} {MONATE[monat - 1]}" + (f" {jahr}" if jahr else "")
+
+
+# "am 1.11." -> "Anfang November", nicht "am Anfang November"
+_VORWORT = re.compile(r"(?<!\w)(am|vom|ab dem|seit dem)\s+$")
+_VORWORT_NEU = {"am": "", "vom": "von ", "ab dem": "ab ", "seit dem": "seit "}
+
+
+def _daten(text: str):
+    for wortlaut, ersatz, anfang in _daten_roh(text):
+        v = _VORWORT.search(text[max(0, anfang - 12):anfang])
+        if v:
+            yield v.group(0) + wortlaut, _VORWORT_NEU[v.group(1)] + ersatz
+        else:
+            yield wortlaut, ersatz
+
+
+def _daten_roh(text: str):
+    """(Wortlaut, Ersatz, Anfang) je Datumsangabe; Tag wird zu Anfang/Mitte/Ende des Monats."""
+    for m in _DATUM_WORT.finditer(text):
+        e = _verallgemeinert(int(m.group(1)), MONATE.index(m.group(2)) + 1, m.group(3))
+        if e:
+            yield m.group(0), e, m.start()
+    for m in _DATUM_PUNKT.finditer(text):
+        tag, monat, jahr = m.group(1), m.group(2), m.group(3)
+        if not jahr:
+            # "2.1." ist eher eine Gliederungsnummer als ein Datum, ebenso
+            # alles am Zeilenanfang ("## 3.4. Personal").
+            if len(tag) == 1 and len(monat) == 1:
+                continue
+            if _ZEILENANFANG.search(text[:m.start()]):
+                continue
+        e = _verallgemeinert(int(tag), int(monat), jahr)
+        if e:
+            yield m.group(0), e, m.start()
+    for m in _DATUM_ISO.finditer(text):
+        e = _verallgemeinert(int(m.group(3)), int(m.group(2)), m.group(1))
+        if e:
+            yield m.group(0), e, m.start()
+
+
 def finde(text: str, typen: set[str]) -> list[Fund]:
     gefunden: dict[str, Fund] = {}
 
@@ -70,4 +126,7 @@ def finde(text: str, typen: set[str]) -> list[Fund]:
             ziffern = sum(c.isdigit() for c in m.group(0))
             if 7 <= ziffern <= 15:
                 neu(m.group(0), "TELEFON")
+    if "DATUM" in typen:
+        for wortlaut, ersatz in _daten(text):
+            gefunden.setdefault(wortlaut, Fund(wortlaut, "DATUM", quelle="regel", ersatz=ersatz))
     return list(gefunden.values())

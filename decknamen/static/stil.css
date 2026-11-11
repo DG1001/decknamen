@@ -117,6 +117,16 @@ main.seite { padding-top: 2rem; padding-bottom: 4rem; }
 .t-ort { --farbe: var(--t-ort); }
 .t-sonstiges { --farbe: var(--t-sonstiges); }
 .band.t-adresse { color: #1d1d1d; text-shadow: 0 1px 0 rgba(255, 255, 255, .35); }
+.t-funktion { --farbe: #6b4e16; }
+.t-einheit { --farbe: #2f5d50; }
+.t-besonders { --farbe: #8c2f5d; }
+.t-datum { --farbe: #4a5a73; }
+/* Verallgemeinert statt ersetzt: das Band ist nur umrandet, die Schrift normal. */
+.band.ersatz {
+  background: color-mix(in srgb, var(--farbe) 14%, transparent);
+  color: inherit; text-shadow: none; font-family: inherit; font-stretch: normal; font-weight: 600;
+  letter-spacing: 0; box-shadow: inset 0 0 0 1.5px var(--farbe);
+}
 .marke .band { font-size: 1.05rem; padding: .05em .5em .1em; }
 
 /* Im Original: was ersetzt wird, unterstrichen in seiner Bandfarbe */
@@ -255,6 +265,17 @@ input.uebernommen { border-color: var(--aktion); box-shadow: 0 0 0 2px color-mix
 .unter-blatt { margin-top: .6rem; }
 
 .nachher { max-width: 44rem; margin-top: 3rem; border-top: 1px solid var(--linie); }
+
+.modus { display: grid; gap: .6rem; margin: 0 0 1.5rem; }
+.modus .wahl > span { display: grid; gap: .1rem; }
+.modus-hinweis { display: inline-block; font-weight: 600; color: var(--t-besonders); margin-bottom: .5rem; }
+
+.restrisiko { max-width: 52rem; margin-top: 3rem; border-top: 1px solid var(--linie); }
+.hinweise { padding-left: 1.4rem; margin: 1rem 0; }
+.hinweise li { margin-bottom: 1rem; padding-left: .25rem; }
+.hinweise p { margin: 0 0 .2rem; }
+.zitat { font-family: var(--mono); font-size: .9rem; background: var(--blatt);
+         border-left: 3px solid var(--t-besonders); padding: .35rem .6rem; overflow-wrap: anywhere; }
 
 .zurueck { max-width: 52rem; }
 .zurueck form { display: grid; gap: .75rem; justify-items: start; margin-bottom: 1rem; }

@@ -25,6 +25,14 @@ BESCHREIBUNG = {
                "Steuer-Nummern, Kfz-Kennzeichen",
     "FIRMA": "Namen von Firmen, Kunden, Lieferanten und Organisationen",
     "ORT": "Orte, Städte, Standorte",
+    # Beim Anonymisieren: was eine Person auch ohne Namen erkennbar macht
+    "FUNKTION": "Funktionen, Positionen und Rollen von Personen, auch einzelne Wörter "
+                "(z. B. „Leitung“, „Leiterin Vertrieb Süd“, „Auszubildender“, „Datenschutzbeauftragter“)",
+    "EINHEIT": "Namen von Abteilungen, Teams, Bereichen, Regionen und Arbeitsgruppen "
+               "(z. B. „Vertrieb Süd“, „Team Innendienst“, „Personalabteilung“)",
+    "BESONDERS": "besondere Angaben über Personen: Gesundheit und Krankheit, Schwangerschaft, "
+                 "Religion, Gewerkschaft, politische Meinung, Herkunft, sexuelle Orientierung, "
+                 "Straftaten, Abmahnungen, Leistungs- und Gehaltsangaben",
 }
 
 # Wörter, die vor Namen stehen, aber selbst keine sind. Die Nachkontrolle sieht
@@ -44,6 +52,7 @@ REGELN = """Regeln:
 - Rollen und Funktionen ohne Namen ("die Teamleitung", "der Kunde") sind keine Funde.
 - Platzhalter in eckigen Klammern wie [Person 1] sind schon ersetzt und keine Funde.
 - Anreden und Titel vor einem Platzhalter ("Frau [Person 2]", "Dr. [Person 3]") sind keine Funde.
+- Nur bei BESONDERS: In "ersatz" steht eine neutrale Formulierung, die grammatisch an die Stelle passt ("krankgeschrieben" -> "abwesend", "wegen ihrer Schwangerschaft" -> "aus persönlichen Gründen").
 - Gibt es nichts, lautet die Antwort {"funde": []}."""
 
 
@@ -54,7 +63,8 @@ def schema(typen: set[str]) -> dict:
             "type": "object",
             "properties": {"text": {"type": "string"},
                            "typ": {"type": "string", "enum": sorted(typen)},
-                           "person": {"type": "string"}},
+                           "person": {"type": "string"},
+                           "ersatz": {"type": "string"}},
             "required": ["text", "typ"]}}},
         "required": ["funde"],
     }
@@ -125,7 +135,8 @@ def lies_antwort(roh: str, abschnitt: str, typen: set[str], quelle: str = "llm")
             continue                           # "Frau" vor einem Platzhalter ist kein Name
         if PLATZHALTER.search(person) or typ != "PERSON" or person == text:
             person = ""
-        funde.append(Fund(text, typ, person=person, quelle=quelle))
+        ersatz = str(e.get("ersatz") or "").strip() if typ == "BESONDERS" else ""
+        funde.append(Fund(text, typ, person=person, quelle=quelle, ersatz=ersatz))
     return funde
 
 
@@ -137,13 +148,14 @@ def _auftrag(abschnitt: str, typen: set[str], bekannte: list[str], nachkontrolle
                 "sind, die ersetzt werden müssen:")
     else:
         kopf = "Finde im folgenden Text alle Angaben dieser Arten:"
-    # Die zuletzt gefundenen zuerst; bei sehr vielen Namen nur ein Ausschnitt,
-    # sonst wächst jede Anfrage mit dem Dokument mit.
+    # Bei sehr vielen Namen nur die zuletzt gefundenen, sonst wächst jede
+    # Anfrage mit dem Dokument mit.
     bekannte = bekannte[-60:]
     bek = ("\nBekannte Personen aus dem übrigen Dokument (für Kürzel und Nachnamen): "
            + ", ".join(bekannte) + "\n") if bekannte else ""
     return (f"{kopf}\n{arten}\n\n{REGELN}\n{bek}\n"
-            'Antwortformat: {"funde": [{"text": "...", "typ": "...", "person": "..."}]}\n\n'
+            'Antwortformat: {"funde": [{"text": "...", "typ": "...", "person": "..."'
+            + (', "ersatz": "..."' if "BESONDERS" in typen else "") + '}]}\n\n'
             f"Text:\n<<<\n{abschnitt}\n>>>")
 
 
@@ -176,3 +188,71 @@ def finde_llm(text: str, typen: set[str], frage: Callable[[str, str], str],
     if fortschritt:
         fortschritt(len(teile), len(teile))
     return list(alle.values())
+
+
+# --------------------------------------------------------- Restrisiko
+
+SYSTEM_BERICHT = ("Du prüfst anonymisierte Texte darauf, ob Personen trotzdem erkennbar bleiben. "
+                  "Du bist gründlich, nennst aber nur echte Risiken. Du antwortest nur mit JSON.")
+
+AUFTRAG_BERICHT = """Der folgende Text wurde anonymisiert: Namen und andere Angaben stehen als Platzhalter in eckigen Klammern, manche Angaben sind verallgemeinert.
+
+Stell dir vor, du bist Kollegin oder Kollege in derselben Firma und kennst alle Beteiligten. Nenne die Stellen, an denen man trotzdem erkennen könnte, um wen es geht: durch Funktion oder Rolle, Geschlecht, besondere Ereignisse, Zeitangaben, Zahlen, Eigenheiten oder die Kombination mehrerer Angaben.
+
+Regeln:
+- "stelle" ist ein wörtliches Zitat aus dem Text, höchstens ein Satz.
+- "grund" sagt in einem Satz, warum die Stelle jemanden erkennbar macht.
+- "vorschlag" sagt, wie man sie entschärft, ohne den Sinn zu zerstören.
+- Die Platzhalter selbst sind kein Risiko.
+- Gibt es keine Risiken, lautet die Antwort {"hinweise": []}.
+
+Antwortformat: {"hinweise": [{"stelle": "...", "grund": "...", "vorschlag": "..."}]}
+
+Text:
+<<<
+%s
+>>>"""
+
+SCHEMA_BERICHT = {
+    "type": "object",
+    "properties": {"hinweise": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"stelle": {"type": "string"}, "grund": {"type": "string"},
+                       "vorschlag": {"type": "string"}},
+        "required": ["stelle", "grund", "vorschlag"]}}},
+    "required": ["hinweise"],
+}
+
+
+def _locker(t: str) -> str:
+    """Zum Wiederfinden von Zitaten: Zeilenumbrüche und Großschreibung zählen nicht."""
+    return " ".join(t.split()).lower()
+
+
+def restrisiko(text: str, frage: Callable[[str, str], str], laenge: int = 4000,
+               fortschritt: Callable[[int, int], None] | None = None) -> list[dict]:
+    """Stellen, an denen jemand mit Insiderwissen Personen erkennen könnte."""
+    hinweise = []
+    teile = abschnitte(text, laenge)
+    for i, teil in enumerate(teile):
+        if fortschritt:
+            fortschritt(i, len(teile))
+        if not teil.strip():
+            continue
+        d = _json(frage(SYSTEM_BERICHT, AUFTRAG_BERICHT % teil))
+        eintraege = d.get("hinweise", []) if isinstance(d, dict) else []
+        for e in eintraege[:12]:
+            if not isinstance(e, dict):
+                continue
+            stelle = str(e.get("stelle") or "").strip().strip("\"'„“")
+            if not stelle:
+                continue
+            gefunden = _locker(stelle) in _locker(teil)
+            if not gefunden and _locker(stelle) in _locker(AUFTRAG_BERICHT):
+                continue                       # zitiert die Anweisung, nicht den Text
+            hinweise.append({"stelle": stelle, "grund": str(e.get("grund") or "").strip(),
+                             "vorschlag": str(e.get("vorschlag") or "").strip(),
+                             "gefunden": gefunden})
+    if fortschritt:
+        fortschritt(len(teile), len(teile))
+    return hinweise

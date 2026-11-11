@@ -21,6 +21,24 @@
 {% endif %}
 
 <form class="hochladen" method="post" action="{{ url_for('neu') }}" enctype="multipart/form-data">
+  <fieldset class="modus">
+    <legend>Wie weit</legend>
+    <label class="wahl">
+      <input type="radio" name="modus" value="pseudonym" checked>
+      <span><strong>Pseudonymisieren</strong>
+        <span class="grau">Namen und Kontaktdaten werden Platzhalter. Die Zuordnung bleibt hier
+        gespeichert, Antworten lassen sich zurückübersetzen.</span></span>
+    </label>
+    <label class="wahl">
+      <input type="radio" name="modus" value="anonym">
+      <span><strong>Anonymisieren</strong>
+        <span class="grau">Zusätzlich werden Funktionen, Abteilungen und besondere Angaben wie
+        Krankheit ersetzt, Datumsangaben verallgemeinert und Anreden vor Namen entfernt. Keine
+        Zuordnung, dafür ein Restrisiko-Bericht. Eine Vorlage für die Prüfung von Hand, keine
+        Garantie im Sinne der DSGVO.</span></span>
+    </label>
+  </fieldset>
+
   <label class="ablage" for="dateien">
     <input type="file" id="dateien" name="dateien" multiple required
            accept=".md,.markdown,.txt,.docx,.pdf">
@@ -45,19 +63,20 @@
     <span>Ergebnis ein zweites Mal prüfen lassen <span class="grau">findet Übersehenes, dauert doppelt so lange</span></span>
   </label>
 
-  <button class="knopf" type="submit">Pseudonymisieren</button>
+  <button class="knopf" type="submit" id="los">Pseudonymisieren</button>
 </form>
 
 <section class="liste">
   <h2>Aufträge</h2>
   {% if auftraege %}
   <table>
-    <thead><tr><th>Angelegt</th><th>Dateien</th><th>Stand</th></tr></thead>
+    <thead><tr><th>Angelegt</th><th>Dateien</th><th>Art</th><th>Stand</th></tr></thead>
     <tbody>
     {% for a in auftraege %}
       <tr>
         <td><a href="{{ url_for('auftrag', auftrag_id=a.id) }}">{{ a.erstellt | zeit }}</a></td>
         <td>{{ a.dateien | map(attribute='name') | join(', ') }}</td>
+        <td>{{ 'anonymisiert' if a.modus == 'anonym' else 'pseudonymisiert' }}</td>
         <td class="stand-{{ a.stand }}">{{ {'wartet': 'wartet', 'laeuft': 'läuft', 'pruefen': 'fertig zum Prüfen', 'fehler': 'Fehler'}[a.stand] }}</td>
       </tr>
     {% endfor %}

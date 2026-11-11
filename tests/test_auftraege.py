@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from decknamen.auftraege import Ablage, verarbeiten, ergebnisse, zuordnung_von, \
+from decknamen.auftraege import Ablage, verarbeiten, ergebnisse, zuordnung_von, bericht_markdown, bericht_erstellen, \
     funde_setzen, fund_hinzufuegen, zuordnung_export, NichtGefunden
 
 
@@ -149,3 +149,83 @@ def test_zweck_bei_der_belegung_verraet_keine_dateinamen(ablage):
     a = _auftrag(ablage, nachkontrolle=False)
     verarbeiten(ablage, a["id"], FalschesLLM(), belegung=Stelle())
     assert gemeldet and "Müller" not in gemeldet[0] and "Protokoll" not in gemeldet[0]
+
+
+# ------------------------------------------------------------ Anonymisieren
+
+class AnonymLLM(FalschesLLM):
+    """Meldet Personen, eine Funktion, eine besondere Angabe und Restrisiken."""
+
+    def chat(self, system, nutzer, schema=None, max_tokens=4096):
+        self.fragen.append(nutzer)
+        abschnitt = nutzer.split("<<<\n", 1)[1]
+        if "Kollegin oder Kollege" in nutzer:
+            return json.dumps({"hinweise": [{"stelle": "einzige Frau im Team",
+                                             "grund": "eindeutig", "vorschlag": "weglassen"}]})
+        funde = [{"text": n, "typ": "PERSON"} for n in ("Anna Müller", "Müller") if n in abschnitt]
+        if "Teamleiterin" in abschnitt:
+            funde.append({"text": "Teamleiterin", "typ": "FUNKTION"})
+        if "krankgeschrieben" in abschnitt:
+            funde.append({"text": "krankgeschrieben", "typ": "BESONDERS", "ersatz": "abwesend"})
+        return json.dumps({"funde": funde})
+
+
+ANONYM = ("Protokoll vom 14. Oktober 2026\n\nFrau Dr. Anna Müller, unsere Teamleiterin, ist bis 31.10. "
+          "krankgeschrieben. Frau Müller ist die einzige Frau im Team.\n")
+
+
+def _anonym(ablage):
+    a = ablage.neu([("p.md", ANONYM)], ["PERSON"], True, modus="anonym")
+    verarbeiten(ablage, a["id"], AnonymLLM())
+    return ablage.laden(a["id"])
+
+
+def test_anonymisieren_nimmt_kontext_daten_und_anreden_mit(ablage):
+    a = _anonym(ablage)
+    assert a["modus"] == "anonym" and {"FUNKTION", "EINHEIT", "BESONDERS", "DATUM"} <= set(a["typen"])
+    [(_, text)] = ergebnisse(ablage, a)
+    assert text == ("Protokoll von Mitte Oktober 2026\n\n[Person 1], unsere [Funktion 1], ist bis "
+                    "Ende Oktober abwesend. [Person 1] ist die einzige Frau im Team.\n")
+
+
+def test_anonymisieren_erstellt_restrisiko_bericht(ablage):
+    a = _anonym(ablage)
+    b = a["bericht"]
+    assert b["modell"] == "falsch-7b" and b["stand"] == a["funde_stand"]
+    assert [(h["datei"], h["stelle"], h["gefunden"]) for h in b["hinweise"]] == [(0, "einzige Frau im Team", True)]
+    md = bericht_markdown(ablage, a)
+    assert "einzige Frau im Team" in md and "keine Bestätigung" in md
+    assert "- Verallgemeinert: 2 Datumsangaben, 1 besondere Angabe\n" in md
+    assert "Anna" not in md and "Müller" not in md
+
+
+def test_bericht_veraltet_nach_aenderungen(ablage):
+    a = _anonym(ablage)
+    funde_setzen(ablage, a, aktiv=set(range(len(a["funde"]))))
+    a = ablage.laden(a["id"])
+    assert a["bericht"]["stand"] != a["funde_stand"]
+    bericht_erstellen(ablage, a["id"], AnonymLLM())
+    a = ablage.laden(a["id"])
+    assert a["bericht"]["stand"] == a["funde_stand"] and a["stand"] == "pruefen"
+
+
+def test_anonym_gibt_keine_zuordnung_heraus(ablage):
+    a = _anonym(ablage)
+    with pytest.raises(PermissionError):
+        zuordnung_export(a, ablage)
+
+
+def test_anonyme_auftraege_halten_hoechstens_einen_tag(ablage):
+    a = _anonym(ablage)
+    a["erstellt"] = time.time() - 25 * 3600
+    ablage.speichern(a)
+    assert ablage.aufraeumen(tage=7) == 1
+
+
+def test_pseudonymisieren_bleibt_wie_es_war(ablage):
+    a = ablage.neu([("p.md", ANONYM)], ["PERSON", "FUNKTION", "DATUM"], True)
+    verarbeiten(ablage, a["id"], AnonymLLM())
+    a = ablage.laden(a["id"])
+    assert a["modus"] == "pseudonym" and a["typen"] == ["PERSON"] and a["bericht"] is None
+    [(_, text)] = ergebnisse(ablage, a)
+    assert text.startswith("Protokoll vom 14. Oktober 2026\n\nFrau Dr. [Person 1], unsere Teamleiterin")

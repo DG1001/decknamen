@@ -9,7 +9,7 @@ Person in jeder Datei gleich heißt.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 
 # Typ -> Bezeichnung im Platzhalter
 TYPEN = {
@@ -22,7 +22,17 @@ TYPEN = {
     "FIRMA": "Firma",
     "ORT": "Ort",
     "SONSTIGES": "Angabe",
+    # Nur beim Anonymisieren
+    "FUNKTION": "Funktion",
+    "EINHEIT": "Einheit",
+    "BESONDERS": "besondere Angabe",
+    "DATUM": "Datum",
 }
+
+# Diese Arten bekommen keinen nummerierten Platzhalter, sondern eine
+# verallgemeinerte Formulierung ("Mitte Oktober 2026", "abwesend").
+ERSATZ_TYPEN = {"DATUM", "BESONDERS"}
+ERSATZ_VORGABE = {"DATUM": "[Datum]", "BESONDERS": "[besondere Angabe]"}
 
 PLATZHALTER = re.compile(r"\[(?:%s) \d+\]" % "|".join(re.escape(v) for v in TYPEN.values()))
 
@@ -37,21 +47,23 @@ class Fund:
     person: str = ""          # bei PERSON: voller Name, falls bekannt
     quelle: str = "llm"       # regel | llm | nachkontrolle | manuell
     aktiv: bool = True
+    ersatz: str = ""          # bei ERSATZ_TYPEN: was statt des Wortlauts eingesetzt wird
 
     def als_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def aus_dict(cls, d: dict) -> "Fund":
-        return cls(**{k: d[k] for k in ("text", "typ", "person", "quelle", "aktiv") if k in d})
+        return cls(**{k: d[k] for k in ("text", "typ", "person", "quelle", "aktiv", "ersatz") if k in d})
 
 
 @dataclass
 class Gruppe:
-    platzhalter: str
+    platzhalter: str          # "[Person 1]" -- oder bei Ersatz die neue Formulierung
     typ: str
     anzeige: str              # wofür der Platzhalter steht (Zurückübersetzen)
     formen: list[str] = field(default_factory=list)
+    ersatz: bool = False      # verallgemeinert statt nummeriert, nicht umkehrbar
 
 
 @dataclass
@@ -59,9 +71,17 @@ class Zuordnung:
     gruppen: list[Gruppe]
     form_zu_platzhalter: dict[str, str]
     muster: re.Pattern | None
+    grundform: dict[str, str] = field(default_factory=dict)   # Schreibweise im Muster -> Fund
 
     def anzeige(self) -> dict[str, str]:
-        return {g.platzhalter: g.anzeige for g in self.gruppen}
+        return {g.platzhalter: g.anzeige for g in self.gruppen if not g.ersatz}
+
+
+# Beim Anonymisieren verschwinden Anrede und Titel mit dem Namen: "Frau Dr. Yıldız"
+# wird zu "[Person 3]", nicht zu "Frau Dr. [Person 3]" -- beides verrät etwas.
+_ANREDEN = ["Frau ", "Herr ", "Herrn ", "Fr. ", "Hr. "]
+_TITELFOLGEN = ["Dr. ", "Prof. ", "Prof. Dr. ", "Dr. Dr. "]
+ANREDE_VOR = _ANREDEN + _TITELFOLGEN + [a + t for a in _ANREDEN for t in _TITELFOLGEN]
 
 
 def _schluessel(f: Fund) -> tuple[str, str]:
@@ -150,12 +170,12 @@ def _genitiv_abstreifen(funde: list[Fund]) -> list[Fund]:
         if f.typ == "PERSON" and f.text.endswith("s") and len(f.text) > 3:
             grund = f.text[:-1]
             if grund in formen or grund in f.person.split():
-                f = Fund(grund, f.typ, f.person, f.quelle, f.aktiv)
+                f = replace(f, text=grund)
         aus.append(f)
     return aus
 
 
-def zuordnen(funde: list[Fund], texte: list[str]) -> Zuordnung:
+def zuordnen(funde: list[Fund], texte: list[str], anrede_weg: bool = False) -> Zuordnung:
     aktive = [f for f in funde if f.aktiv and f.text.strip() and f.typ in TYPEN
               and not PLATZHALTER.fullmatch(f.text.strip())]
     aktive = _genitiv_abstreifen(aktive)
@@ -164,7 +184,9 @@ def zuordnen(funde: list[Fund], texte: list[str]) -> Zuordnung:
 
     gruppen: dict[tuple[str, str], list[Fund]] = {}
     for f in aktive:
-        gruppen.setdefault(_schluessel(f), []).append(f)
+        # Ersatzarten: jede Schreibweise für sich, sie bekommt ihre eigene Formulierung.
+        k = (f.typ, "\0" + f.text) if f.typ in ERSATZ_TYPEN else _schluessel(f)
+        gruppen.setdefault(k, []).append(f)
     gruppen = _personen_zusammenlegen(gruppen)
 
     def beginn(fs):
@@ -173,18 +195,31 @@ def zuordnen(funde: list[Fund], texte: list[str]) -> Zuordnung:
     zaehler: dict[str, int] = {}
     ergebnis: list[Gruppe] = []
     form_zu: dict[str, str] = {}
+    typ_von: dict[str, str] = {}
     for (typ, _), fs in sorted(gruppen.items(), key=lambda kv: beginn(kv[1])):
-        zaehler[typ] = zaehler.get(typ, 0) + 1
-        ph = f"[{TYPEN[typ]} {zaehler[typ]}]"
         formen = sorted({f.text for f in fs}, key=lambda s: erste[s])
+        ersatz = typ in ERSATZ_TYPEN
+        if ersatz:
+            ph = next((f.ersatz for f in fs if f.ersatz), ERSATZ_VORGABE[typ])
+        else:
+            zaehler[typ] = zaehler.get(typ, 0) + 1
+            ph = f"[{TYPEN[typ]} {zaehler[typ]}]"
         kandidaten = formen + [f.person for f in fs if f.person]
         anzeige = max(kandidaten, key=lambda s: (len(s.split()), len(s)))
-        ergebnis.append(Gruppe(ph, typ, anzeige, formen))
+        ergebnis.append(Gruppe(ph, typ, anzeige, formen, ersatz))
         for form in formen:
-            form_zu.setdefault(form, ph)
+            if form not in form_zu:
+                form_zu[form], typ_von[form] = ph, typ
 
-    alias = {v: ph for form, ph in form_zu.items() for v in _varianten(form)}
-    return Zuordnung(ergebnis, alias, _muster(alias))
+    alias: dict[str, str] = {}
+    grund: dict[str, str] = {}
+    for form, ph in form_zu.items():
+        vorsaetze = [""] + (ANREDE_VOR if anrede_weg and typ_von[form] == "PERSON" else [])
+        for v in _varianten(form):
+            for vor in vorsaetze:
+                alias.setdefault(vor + v, ph)
+                grund.setdefault(vor + v, form)
+    return Zuordnung(ergebnis, alias, _muster(alias), grund)
 
 
 def ersetzen(text: str, z: Zuordnung) -> str:
@@ -203,15 +238,10 @@ def stellen(text: str, z: Zuordnung):
 
 def zaehlen(texte: list[str], z: Zuordnung) -> dict[str, int]:
     """Vorkommen je Schreibweise (Großschreibung zählt zur Grundform)."""
-    grund = {}
-    for g in z.gruppen:
-        for form in g.formen:
-            for v in _varianten(form):
-                grund.setdefault(v, form)
     zahl: dict[str, int] = {}
     for t in texte:
         for _, _, form, _ in stellen(t, z):
-            f = grund.get(form, form)
+            f = z.grundform.get(form, form)
             zahl[f] = zahl.get(f, 0) + 1
     return zahl
 

@@ -98,3 +98,58 @@ def test_liste_bekannter_personen_bleibt_kurz():
     finde_llm("Text", {"PERSON"}, frage, bekannte=viele)
     import re
     assert len(re.findall(r"Nachname\d+", gesehen[0])) == 60
+
+
+def test_besondere_angabe_bringt_ihre_neutrale_formulierung_mit():
+    roh = json.dumps({"funde": [
+        {"text": "krankgeschrieben", "typ": "BESONDERS", "ersatz": "abwesend"},
+        {"text": "Leiterin Vertrieb Süd", "typ": "FUNKTION", "ersatz": "egal"}]})
+    funde = lies_antwort(roh, "Die Leiterin Vertrieb Süd ist krankgeschrieben.", {"BESONDERS", "FUNKTION"})
+    assert [(f.typ, f.text, f.ersatz) for f in funde] == [
+        ("BESONDERS", "krankgeschrieben", "abwesend"), ("FUNKTION", "Leiterin Vertrieb Süd", "")]
+
+
+def test_kontextarten_stehen_im_auftrag_und_im_schema():
+    from decknamen.erkennen import schema
+    gesehen = []
+    finde_llm("Text", {"PERSON", "FUNKTION", "EINHEIT", "BESONDERS"},
+              lambda s, n: gesehen.append(n) or '{"funde": []}')
+    assert "FUNKTION" in gesehen[0] and "BESONDERS" in gesehen[0] and "ersatz" in gesehen[0]
+    assert "ersatz" in schema({"BESONDERS"})["properties"]["funde"]["items"]["properties"]
+
+
+def test_restrisiko_hinweise_mit_wortlaut_pruefung():
+    from decknamen.erkennen import restrisiko
+    text = "[Person 1] ist die einzige Frau im Vertrieb.\n\n[Person 2] kommt."
+
+    def frage(system, nutzer):
+        assert "Kollegin" in nutzer or "Kollege" in nutzer
+        return json.dumps({"hinweise": [
+            {"stelle": "die einzige Frau im Vertrieb", "grund": "eindeutig", "vorschlag": "streichen"},
+            {"stelle": "erfundenes Zitat", "grund": "x", "vorschlag": "y"}]})
+    h = restrisiko(text, frage)
+    assert [(x["stelle"], x["gefunden"]) for x in h] == [
+        ("die einzige Frau im Vertrieb", True), ("erfundenes Zitat", False)]
+
+
+def test_restrisiko_zitat_gilt_trotz_zeilenumbruch_und_grossschreibung_als_gefunden():
+    from decknamen.erkennen import restrisiko
+    text = "Rückfragen bitte\ndirekt an [E-Mail 2], dass das Angebot offen ist."
+
+    def frage(system, nutzer):
+        return json.dumps({"hinweise": [
+            {"stelle": "Rückfragen bitte direkt an [E-Mail 2]", "grund": "g", "vorschlag": "v"},
+            {"stelle": "Das Angebot offen ist.", "grund": "g", "vorschlag": "v"},
+            {"stelle": "Das Angebot ist offen.", "grund": "g", "vorschlag": "v"}]})
+    assert [h["gefunden"] for h in restrisiko(text, frage)] == [True, True, False]
+
+
+def test_restrisiko_verwirft_zitate_aus_der_eigenen_anweisung():
+    from decknamen.erkennen import restrisiko
+
+    def frage(system, nutzer):
+        return json.dumps({"hinweise": [
+            {"stelle": "Stell dir vor, du bist Kollegin oder Kollege in derselben Firma und kennst alle Beteiligten.",
+             "grund": "g", "vorschlag": "v"},
+            {"stelle": "[Person 1] kommt", "grund": "g", "vorschlag": "v"}]})
+    assert [h["stelle"] for h in restrisiko("[Person 1] kommt.", frage)] == ["[Person 1] kommt"]

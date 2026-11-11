@@ -5,7 +5,9 @@ eigenen Netz läuft.
 
 Wer Protokolle, Arbeitsanweisungen oder E-Mails mit einem Cloud-Modell weiterverarbeiten will,
 schickt sonst Namen, Telefonnummern und Anschriften mit. decknamen ersetzt diese Angaben vorher
-durch Platzhalter wie `[Person 1]` oder `[E-Mail 2]`. Erkannt wird mit einem **lokalen**
+durch Platzhalter wie `[Person 1]` oder `[E-Mail 2]`. Auf Wunsch anonymisiert es weitergehend:
+auch Funktionen, Abteilungen, Datumsangaben und Gesundheitsangaben, mit einem
+Restrisiko-Bericht zum Schluss. Erkannt wird mit einem **lokalen**
 Sprachmodell (vLLM, llama.cpp, Ollama, LM Studio oder jedem anderen OpenAI-kompatiblen Server).
 Die Dokumente gehen nur an dieses Modell.
 
@@ -38,12 +40,37 @@ and lets you review every replacement before downloading the result as Markdown.
    arbeitet, lässt sich wieder in echte Namen zurückübersetzen. Die Zuordnung gibt es auch als
    JSON.
 
+## Anonymisieren
+
+Beim Hochladen lässt sich statt „Pseudonymisieren“ auch „Anonymisieren“ wählen. Dann geht
+decknamen weiter:
+
+1. **Kein Schlüssel:** Die Zuordnung gibt es weder als Download noch zum Zurückübersetzen.
+   Der Auftrag wird spätestens nach einem Tag gelöscht.
+2. **Anreden und Titel fallen weg:** Aus „Frau Dr. Yıldız“ wird `[Person 3]`, nicht
+   „Frau Dr. [Person 3]“.
+3. **Datumsangaben werden verallgemeinert:** „am 14. Oktober 2026“ wird „Mitte Oktober 2026“,
+   „bis 31.10.“ wird „bis Ende Oktober“.
+4. **Kontext wird ersetzt:** Funktionen und Rollen (`[Funktion 1]` statt „Leitung“),
+   Abteilungen und Teams (`[Einheit 2]`) und besondere Angaben wie Gesundheit, Religion oder
+   Abmahnungen. Für Letztere schlägt das Modell eine neutrale Formulierung vor
+   („krankgeschrieben“ wird „abwesend“).
+5. **Restrisiko-Bericht:** Am Ende liest das Modell den fertigen Text, als kenne es alle
+   Beteiligten, und nennt die Stellen, an denen man trotzdem erkennen könnte, um wen es geht,
+   mit Grund und Vorschlag. Der Bericht liegt dem ZIP als `restrisiko.md` bei.
+
+Das ist eine **Vorlage für die Prüfung von Hand, keine Garantie**. Ob ein Text anonym im
+Sinne der DSGVO ist, hängt davon ab, wer ihn liest und was diese Person weiß (Erwägungsgrund
+26). Das kann kein Werkzeug prüfen. Was der Bericht anspricht, lässt sich in der Prüfansicht
+als Begriff ergänzen. Danach den Bericht neu erstellen lassen.
+
 ## Was es nicht tut
 
-- **Anonymisieren.** Pseudonymisierte Texte bleiben personenbezogen im Sinne der DSGVO. Wer die
-  Zuordnung hat, kann sie auflösen, und der Kontext verrät oft genug („die Leiterin des
-  Vertriebs Süd“, „krankgeschrieben bis 31.10.“). decknamen nimmt die direkten Kennzeichen
-  heraus; ob der Rest weitergegeben werden darf, bleibt eine eigene Entscheidung.
+- **Anonymität garantieren.** Pseudonymisierte Texte bleiben personenbezogen im Sinne der
+  DSGVO. Wer die Zuordnung hat, kann sie auflösen, und der Kontext verrät oft genug („die
+  Leiterin des Vertriebs Süd“, „krankgeschrieben bis 31.10.“). Der Modus „Anonymisieren“ nimmt
+  auch diesen Kontext heraus und benennt das Restrisiko. Ob der Rest weitergegeben werden
+  darf, bleibt eine eigene Entscheidung.
 - **Fehlerfrei erkennen.** Auch ein gutes Modell übersieht etwas. Deshalb gibt es die
   Prüfansicht, und deshalb sollte man sie benutzen.
 - **Gescannte PDFs lesen.** Ohne Textebene gibt es keinen Text; eine Texterkennung (OCR) ist

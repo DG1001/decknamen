@@ -4,6 +4,7 @@
 <section class="pruefkopf">
   <div>
     <h1>Prüfen, dann herunterladen</h1>
+    {% if anonym %}<p class="modus-hinweis">Anonymisiert: ohne Zuordnung, mit Restrisiko-Bericht.</p>{% endif %}
     <p class="grau">
       {{ ersetzungen }} Stellen in {{ namen | length }} Datei{{ 'en' if namen | length != 1 }} ersetzt,
       {{ gruppen | length }} Platzhalter.
@@ -27,7 +28,7 @@
   <form class="funde" id="funde" method="post" action="{{ url_for('funde', auftrag_id=a.id) }}">
     <input type="hidden" name="datei" value="{{ nr }}">
     <h2>Platzhalter</h2>
-    {% for g in gruppen %}
+    {% for g in gruppen | rejectattr('ersatz') %}
     <div class="gruppe">
       <p class="gruppe-kopf"><mark class="band t-{{ g.typ | lower }}">{{ g.ph }}</mark>
         {% if g.typ == 'PERSON' or g.formen | length > 1 %}<span>{{ g.anzeige }}</span>{% endif %}</p>
@@ -44,6 +45,23 @@
     {% else %}
     <p class="grau">Nichts gefunden. Wenn das nicht stimmt, Begriffe unten von Hand ergänzen.</p>
     {% endfor %}
+
+    {% set verallgemeinert = gruppen | selectattr('ersatz') | list %}
+    {% if verallgemeinert %}
+    <div class="gruppe">
+      <p class="gruppe-kopf">Verallgemeinert</p>
+      <ul>
+      {% for g in verallgemeinert %}{% for f in g.formen %}
+        <li><label class="wahl">
+          <input type="checkbox" name="aktiv" value="{{ f.i }}" checked>
+          <span><span class="form">{{ f.text }}</span> <span class="grau klein">wird</span>
+            <mark class="band ersatz t-{{ g.typ | lower }}">{{ g.ph }}</mark>
+            <span class="grau klein">{{ f.zahl }}×, {{ f.quelle }}</span></span>
+        </label></li>
+      {% endfor %}{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
 
     {% if uebrige %}
     <div class="gruppe abgewaehlt">
@@ -69,6 +87,10 @@
           {% for schluessel, name, _ in arten %}<option value="{{ schluessel }}">{{ name }}</option>{% endfor %}
         </select>
       </label>
+      {% if anonym %}
+      <label>Ersetzen durch <span class="grau">nur bei Datum und besonderen Angaben</span>
+        <input type="text" name="neu_ersatz" autocomplete="off" placeholder="z. B. abwesend"></label>
+      {% endif %}
       {% if personen %}
       <label>Gehört zu
         <select name="neu_person">
@@ -108,7 +130,53 @@
   </section>
 </div>
 
+{% if anonym %}
+<section class="restrisiko" id="restrisiko">
+  <h2>Restrisiko</h2>
+  {% if a.bericht_fehler %}
+    <div class="hinweis fehler" role="alert"><p>Der Bericht ließ sich nicht erstellen: {{ a.bericht_fehler }}</p></div>
+  {% endif %}
+  {% if bericht %}
+    {% if bericht_veraltet %}
+    <div class="hinweis"><p>Der Bericht stammt von vor den letzten Änderungen an den Funden.</p></div>
+    {% endif %}
+    <p class="grau">
+      Das Modell hat den fertigen Text gelesen, als kenne es alle Beteiligten.
+      {% if bericht.hinweise %}Diese Stellen könnten trotzdem verraten, um wen es geht.
+      {% else %}Es hat keine Stelle gefunden, die Personen erkennbar macht. Das ist kein Beweis.{% endif %}
+    </p>
+    {% if bericht.hinweise %}
+    <ol class="hinweise">
+      {% for h in bericht.hinweise %}
+      <li>
+        <p class="zitat">„{{ h.stelle }}“ <span class="grau klein">{{ namen[h.datei] }}{% if not h.gefunden %}, nicht wörtlich im Text{% endif %}</span></p>
+        <p>{{ h.grund }}</p>
+        {% if h.vorschlag %}<p class="grau">Vorschlag: {{ h.vorschlag }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  {% endif %}
+  <div class="reihe">
+    <form method="post" action="{{ url_for('bericht_neu', auftrag_id=a.id) }}">
+      <button class="knopf leise" type="submit">Bericht neu erstellen</button>
+    </form>
+    {% if bericht %}<a class="knopf leise" href="{{ url_for('restrisiko', auftrag_id=a.id) }}">Bericht herunterladen</a>{% endif %}
+  </div>
+  <p class="grau klein">Was der Bericht anspricht, lässt sich oben als Begriff ergänzen, etwa als
+    Funktion oder besondere Angabe. Danach den Bericht neu erstellen lassen.</p>
+</section>
+{% endif %}
+
 <section class="nachher">
+  {% if anonym %}
+  <h2>Danach</h2>
+  <p>
+    Eine Zuordnung gibt es nicht zum Herunterladen. Solange der Auftrag besteht, liegen die
+    Originaltexte aber noch hier. Er wird spätestens nach einem Tag gelöscht, nach dem
+    Herunterladen am besten sofort.
+  </p>
+  {% else %}
   <h2>Später</h2>
   <p>
     <a href="{{ url_for('zurueck', auftrag_id=a.id) }}">Text mit Platzhaltern zurückübersetzen</a>,
@@ -116,6 +184,7 @@
     Die <a href="{{ url_for('zuordnung', auftrag_id=a.id) }}">Zuordnung als JSON</a> enthält die echten Namen
     und bleibt im Haus.
   </p>
+  {% endif %}
   <form method="post" action="{{ url_for('loeschen', auftrag_id=a.id) }}">
     <button class="knopf leise" type="submit">Auftrag jetzt löschen</button>
   </form>
