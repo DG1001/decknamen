@@ -12,7 +12,7 @@ import json
 import re
 from typing import Callable
 
-from .kern import Fund, PLATZHALTER, TYPEN, _TITEL
+from .kern import Fund, PLATZHALTER, TYPEN, _TITEL, einheitlich
 
 BESCHREIBUNG = {
     "PERSON": "Namen von Personen: Vor- und Nachnamen, auch einzeln, Kürzel und Initialen "
@@ -119,15 +119,18 @@ def lies_antwort(roh: str, abschnitt: str, typen: set[str], quelle: str = "llm")
         person = str(e.get("person") or "").strip()
         if typ not in typen or typ not in TYPEN or len(text) < 2:
             continue
-        if text not in abschnitt:
+        # Zeilenumbrüche mitten im Fund zählen nicht ("0731↵4455-120").
+        text = einheitlich(text)
+        breit = einheitlich(abschnitt)
+        if text not in breit:
             ohne = _TITEL.sub("", text).strip()
-            if ohne and ohne in abschnitt:
+            if ohne and ohne in breit:
                 text = ohne
             else:
                 continue                       # erfunden oder verändert
         elif typ == "PERSON":
             ohne = _TITEL.sub("", text).strip()
-            if ohne and ohne != text and ohne in abschnitt:
+            if ohne and ohne != text and ohne in breit:
                 text = ohne
         if PLATZHALTER.search(text):
             continue

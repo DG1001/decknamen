@@ -19,10 +19,11 @@ and lets you review every replacement before downloading the result as Markdown.
 
 ## Was es tut
 
-1. **Einlesen:** Markdown, Text, Word (`.docx`) und PDF mit Textebene. Aus Word und PDF wird
-   Markdown; Überschriften, Listen und Tabellen bleiben erhalten. Kopf- und Fußzeilen werden
-   mitgenommen und mit pseudonymisiert. Kommentare, Dokumenteigenschaften (Autor, letzter
-   Bearbeiter) und eingebettete Bilder fallen weg.
+1. **Einlesen:** Markdown, Text, Word (`.docx`) und PDF. Aus Word und PDF wird Markdown;
+   Überschriften, Listen und Tabellen bleiben erhalten. Kopf- und Fußzeilen werden mitgenommen
+   und mit pseudonymisiert. Kommentare, Dokumenteigenschaften (Autor, letzter Bearbeiter) und
+   eingebettete Bilder fallen weg. Eingescannte PDFs und Bilder (PNG, JPG, TIFF) liest
+   Tesseract, wenn es installiert ist; bei gemischten PDFs nur die Seiten ohne Textebene.
 2. **Feste Muster:** E-Mail-Adressen, Telefonnummern und IBANs (mit Prüfsumme) findet ein
    regulärer Ausdruck. Diese Angaben sind auch dann weg, wenn das Modell sie übersieht.
 3. **Sprachmodell:** Der Text geht abschnittsweise an das lokale Modell. Es meldet Namen (auch
@@ -73,8 +74,10 @@ als Begriff ergänzen. Danach den Bericht neu erstellen lassen.
   darf, bleibt eine eigene Entscheidung.
 - **Fehlerfrei erkennen.** Auch ein gutes Modell übersieht etwas. Deshalb gibt es die
   Prüfansicht, und deshalb sollte man sie benutzen.
-- **Gescannte PDFs lesen.** Ohne Textebene gibt es keinen Text; eine Texterkennung (OCR) ist
-  nicht eingebaut.
+- **Handschrift zuverlässig lesen.** Tesseract kommt mit sauberen Scans gut zurecht, mit
+  Handschrift und schlechten Fotos kaum. Erkennungsfehler verstümmeln auch Namen
+  („Mül1er“), die dann leicht stehen bleiben. Per Texterkennung gelesene Seiten sind in der
+  Prüfansicht gekennzeichnet.
 - **Word-Dateien zurückschreiben.** Das Ergebnis ist Markdown, nicht `.docx`.
 
 Ersetzt wird immer das ganze Wort an jeder Stelle. Heißt jemand Koch, wird auch „der Koch“
@@ -89,7 +92,9 @@ ersetzt. Das ist die sichere Richtung; in der Prüfansicht fällt es auf.
 - **Nichts von außen.** Die Oberfläche bringt alles selbst mit: keine CDN, keine Webfonts. Die
   Content Security Policy verbietet dem Browser jede Verbindung zu einer anderen Adresse.
 - **Ablage nur für den eigenen Benutzer.** Ordner `0700`, Dateien `0600`. Gespeichert wird der
-  herausgelöste Text, nicht die hochgeladene Datei. Aufträge werden nach sieben Tagen gelöscht
+  herausgelöste Text, nicht die hochgeladene Datei. Nur Scans liegen bis zur Texterkennung
+  selbst in der Ablage; die Seitenbilder entstehen in einem temporären Verzeichnis, das danach
+  gelöscht wird. Aufträge werden nach sieben Tagen gelöscht
   (`--aufbewahrung`), auf Wunsch sofort.
 - **Passwort im Netz.** Lauscht die Oberfläche nicht nur auf `127.0.0.1`, verlangt decknamen
   ein Passwort (HTTP Basic). Formulare von fremden Seiten werden abgewiesen.
@@ -107,6 +112,15 @@ python3 -m venv .venv
 ```
 
 Dann `http://127.0.0.1:8096/` im Browser öffnen.
+
+Für eingescannte PDFs und Bilder zusätzlich Tesseract und Poppler installieren:
+
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-deu poppler-utils    # Debian, Ubuntu
+brew install tesseract tesseract-lang poppler                     # macOS
+```
+
+decknamen findet beides von selbst und meldet beim Start, ob die Texterkennung bereitsteht.
 
 Übliche Adressen lokaler Modellserver:
 
@@ -143,6 +157,8 @@ sie nicht, auch nicht hinter einem Proxy.
 | `--passwort-datei` | `DECKNAMEN_PASSWORT_DATEI` | | Passwort aus Datei (oder `DECKNAMEN_PASSWORT`) |
 | `--belegung` | `DECKNAMEN_BELEGUNG` | | Belegungsstelle für ein geteiltes Modell |
 | `--abschnitt` | | `4000` | Zeichen je Anfrage an das Modell |
+| `--ocr-sprachen` | `DECKNAMEN_OCR_SPRACHEN` | `deu+eng` | Sprachen für Tesseract |
+| `--ohne-ocr` | | aus | Texterkennung abschalten |
 | `--mit-denken` | | aus | Denkmodus des Modells nicht abschalten |
 | `--erlaube-entferntes-llm` | | aus | auch öffentliche LLM-Adressen zulassen |
 
@@ -173,8 +189,9 @@ nicht erreichbar, läuft die Arbeit ohne sie.
 ```
 
 Die Tests brauchen kein Modell; ein kleiner Testserver spielt den OpenAI-kompatiblen Endpunkt.
-Im Ordner `beispiele/` liegen ein Protokoll und eine Arbeitsanweisung mit erfundenen Namen zum
-Ausprobieren.
+Im Ordner `beispiele/` liegen ein Protokoll (auch als eingescanntes PDF) und eine
+Arbeitsanweisung mit erfundenen Namen zum Ausprobieren. Die Tests zur Texterkennung laufen nur,
+wenn Tesseract installiert ist.
 
 ## Lizenz
 

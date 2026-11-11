@@ -205,3 +205,34 @@ def test_pseudonym_hat_keinen_restrisiko_bericht(umgebung):
     c, _ = umgebung
     aid = _auftrag_id(_hochladen(c))
     assert c.get(f"/auftrag/{aid}/restrisiko.md").status_code == 404
+
+
+# ------------------------------------------------------------ Texterkennung
+
+from test_texterkennung import OCR, SCAN, _bild, _pdf, mit_tesseract  # noqa: E402
+
+
+class OcrWerkstatt(SofortWerkstatt):
+    def einreihen(self, auftrag_id, art="erkennen"):
+        verarbeiten(self.ablage, auftrag_id, self.llm, ocr=OCR)
+
+
+@mit_tesseract
+def test_eingescannte_pdf_ueber_die_oberflaeche(tmp_path):
+    ablage = Ablage(tmp_path / "d")
+    app = app_bauen(ablage, OcrWerkstatt(ablage, FalschesLLM(personen=["Anna Mueller"])),
+                    lambda: {"basis": "x", "modell": "m", "fehler": ""}, ocr=OCR)
+    c = app.test_client()
+    assert "eingescannte PDFs" in c.get("/").get_data(as_text=True)
+    r = c.post("/auftrag", data={"dateien": (io.BytesIO(_pdf([_bild(SCAN)])), "scan.pdf"), "typ": ["PERSON"]},
+               content_type="multipart/form-data")
+    assert r.status_code == 303
+    seite = c.get(r.headers["Location"]).get_data(as_text=True)
+    assert "Texterkennung" in seite and "[Person 1]" in seite
+
+
+def test_eingescannte_pdf_ohne_texterkennung_wird_beim_hochladen_erklaert(umgebung):
+    c, _ = umgebung
+    r = c.post("/auftrag", data={"dateien": (io.BytesIO(_pdf([_bild(SCAN)])), "scan.pdf"), "typ": ["PERSON"]},
+               content_type="multipart/form-data")
+    assert r.status_code == 400 and "tesseract-ocr" in r.get_data(as_text=True)

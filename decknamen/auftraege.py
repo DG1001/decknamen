@@ -22,6 +22,7 @@ import traceback
 
 from . import erkennen, kern, regeln
 from .kern import Fund, TYPEN
+from .lesen import lesen_mit_info
 
 _ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
 
@@ -59,8 +60,9 @@ class Ablage:
             raise KeyError(auftrag_id)
         return self.wurzel / auftrag_id
 
-    def neu(self, dateien: list[tuple[str, str]], typen: list[str], nachkontrolle: bool,
+    def neu(self, dateien: list[tuple], typen: list[str], nachkontrolle: bool,
             modus: str = "pseudonym") -> dict:
+        """dateien: (Name, Text) oder (Name, None, Rohdaten) für die spätere Texterkennung."""
         if modus not in MODI:
             raise ValueError(modus)
         typen = [t for t in typen if t not in KONTEXT_TYPEN]
@@ -70,10 +72,21 @@ class Ablage:
         ordner = self._pfad(auftrag_id)
         _ordner(ordner)
         _ordner(ordner / "texte")
-        for i, (_, text) in enumerate(dateien):
-            _schreiben(ordner / "texte" / f"{i}.md", text)
+        _ordner(ordner / "roh")
+        eintraege = []
+        for i, (name, text, *roh) in enumerate(dateien):
+            if text is None:
+                # Bis zur Texterkennung liegt die Datei selbst hier, danach nicht mehr.
+                pfad = ordner / "roh" / f"{i}{pathlib.Path(name).suffix.lower()}"
+                fd = os.open(pfad, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "wb") as f:
+                    f.write(roh[0])
+                eintraege.append({"name": name, "zeichen": 0, "ocr_seiten": [], "ocr_offen": True})
+            else:
+                _schreiben(ordner / "texte" / f"{i}.md", text)
+                eintraege.append({"name": name, "zeichen": len(text), "ocr_seiten": []})
         a = {"id": auftrag_id, "erstellt": time.time(),
-             "dateien": [{"name": n, "zeichen": len(t)} for n, t in dateien],
+             "dateien": eintraege,
              "typen": [t for t in TYPEN if t in typen], "nachkontrolle": bool(nachkontrolle),
              "modus": modus, "art": "erkennen",
              "stand": "wartet", "schritt": "In der Warteschlange", "anteil": 0.0,
@@ -99,7 +112,15 @@ class Ablage:
 
     def texte(self, a: dict) -> list[str]:
         o = self._pfad(a["id"]) / "texte"
-        return [(o / f"{i}.md").read_text(encoding="utf-8") for i in range(len(a["dateien"]))]
+        return [(o / f"{i}.md").read_text(encoding="utf-8") if (o / f"{i}.md").is_file() else ""
+                for i in range(len(a["dateien"]))]
+
+    def roh(self, a: dict, i: int) -> pathlib.Path | None:
+        o = self._pfad(a["id"]) / "roh"
+        return next(iter(o.glob(f"{i}.*")), None) if o.is_dir() else None
+
+    def text_setzen(self, a: dict, i: int, text: str) -> None:
+        _schreiben(self._pfad(a["id"]) / "texte" / f"{i}.md", text)
 
     def alle(self) -> list[dict]:
         aus = []
@@ -136,9 +157,28 @@ def _personen(funde) -> list[str]:
     return namen
 
 
-def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int = 4000) -> None:
+def _texterkennung(ablage: Ablage, a: dict, ocr, melden) -> None:
+    """Zurückgestellte Dateien lesen; die Rohdatei wird danach gelöscht."""
+    offen = [i for i, d in enumerate(a["dateien"]) if d.get("ocr_offen")]
+    for k, i in enumerate(offen):
+        d = a["dateien"][i]
+        pfad = ablage.roh(a, i)
+        if pfad is None:
+            raise RuntimeError(f"Die hochgeladene Datei {k + 1} fehlt, bitte neu hochladen.")
+
+        def fort(s, n, k=k):
+            melden(stand="laeuft", schritt=f"Texterkennung: Datei {k + 1} von {len(offen)}, "
+                                           f"Seite {min(s + 1, n)} von {n}")
+        text, seiten = lesen_mit_info(d["name"], pfad.read_bytes(), ocr, fort)
+        ablage.text_setzen(a, i, text)
+        d.update(zeichen=len(text), ocr_seiten=seiten, ocr_offen=False)
+        melden()
+        pfad.unlink()
+
+
+def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int = 4000,
+                ocr=None) -> None:
     a = ablage.laden(auftrag_id)
-    texte = ablage.texte(a)
     typen = set(a["typen"])
     anonym = a["modus"] == "anonym"
     beginn = time.time()
@@ -163,7 +203,10 @@ def verarbeiten(ablage: Ablage, auftrag_id: str, llm, belegung=None, laenge: int
 
     try:
         abgeschlossen = False
-        melden(stand="laeuft", schritt="Feste Muster: E-Mail, Telefon, IBAN", anteil=0.0, fehler="")
+        melden(stand="laeuft", anteil=0.0, fehler="")
+        _texterkennung(ablage, a, ocr, melden)
+        texte = ablage.texte(a)
+        melden(schritt="Feste Muster: E-Mail, Telefon, IBAN")
         for t in texte:
             dazu(regeln.finde(t, typen))
 
@@ -270,8 +313,8 @@ class Werkstatt:
     """Arbeitet Aufträge nacheinander ab -- das Modell ist ohnehin nur eins."""
 
     def __init__(self, ablage: Ablage, llm_bauen, belegung=None, laenge: int = 4000,
-                 aufbewahrung_tage: float = 7):
-        self.ablage, self.llm_bauen, self.belegung = ablage, llm_bauen, belegung
+                 aufbewahrung_tage: float = 7, ocr=None):
+        self.ablage, self.llm_bauen, self.belegung, self.ocr = ablage, llm_bauen, belegung, ocr
         self.laenge, self.tage = laenge, aufbewahrung_tage
         self.schlange: queue.Queue[str] = queue.Queue()
         for a in reversed(ablage.alle()):            # nach einem Neustart weitermachen
@@ -303,7 +346,7 @@ class Werkstatt:
                 if self.ablage.laden(auftrag_id)["art"] == "bericht":
                     bericht_erstellen(self.ablage, auftrag_id, llm, self.belegung, self.laenge)
                 else:
-                    verarbeiten(self.ablage, auftrag_id, llm, self.belegung, self.laenge)
+                    verarbeiten(self.ablage, auftrag_id, llm, self.belegung, self.laenge, self.ocr)
             except Exception:
                 traceback.print_exc()
 
@@ -353,7 +396,7 @@ def funde_setzen(ablage: Ablage, a: dict, aktiv: set[int]) -> None:
 
 def fund_hinzufuegen(ablage: Ablage, a: dict, text: str, typ: str, person: str,
                      ersatz: str = "") -> None:
-    text, person, ersatz = text.strip(), person.strip(), ersatz.strip()
+    text, person, ersatz = kern.einheitlich(text), person.strip(), ersatz.strip()
     if typ not in kern.ERSATZ_TYPEN:
         ersatz = ""
     if typ not in TYPEN or not text:

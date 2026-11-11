@@ -18,7 +18,7 @@ from markupsafe import Markup, escape
 
 from . import auftraege, kern
 from .kern import TYPEN
-from .lesen import ENDUNGEN, NichtLesbar, lesen
+from .lesen import BILDER, ENDUNGEN, NichtLesbar, braucht_ocr, lesen
 
 QUELLEN = {"regel": "Muster", "llm": "Modell", "nachkontrolle": "Nachkontrolle", "manuell": "von Hand"}
 
@@ -68,7 +68,7 @@ def _herunterladen(daten: bytes, name: str, art: str):
 
 
 def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
-              max_mb: int = 50, aufbewahrung_tage: float = 7) -> Flask:
+              max_mb: int = 50, aufbewahrung_tage: float = 7, ocr=None) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = max_mb * 1024 * 1024
     lage_merker = {"zeit": 0.0, "wert": None}
@@ -110,8 +110,11 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
     # ---------------------------------------------------------- Startseite
 
     def startseite(fehler=None, code=200):
+        mit_ocr = bool(ocr and ocr.verfuegbar)
+        endungen = [e for e in ENDUNGEN if mit_ocr or e not in BILDER]
         return render_template("start.html", auftraege=ablage.alle(), arten=ARTEN,
-                               kontext_arten=KONTEXT_ARTEN,
+                               kontext_arten=KONTEXT_ARTEN, mit_ocr=mit_ocr,
+                               accept=",".join(endungen),
                                vorgewaehlt=VORGEWAEHLT, endungen=", ".join(ENDUNGEN),
                                fehler=fehler or [], tage=aufbewahrung_tage), code
 
@@ -130,10 +133,14 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
         gelesen, fehler = [], []
         for f in dateien:
             name = f.filename.replace("\\", "/").rsplit("/", 1)[-1]
+            daten = f.read()
             try:
-                gelesen.append((name, lesen(name, f.read())))
+                if ocr is not None and ocr.verfuegbar and braucht_ocr(name, daten):
+                    gelesen.append((name, None, daten))      # Texterkennung im Hintergrund
+                else:
+                    gelesen.append((name, lesen(name, daten)))
             except NichtLesbar as e:
-                fehler.append(str(e))
+                fehler.append(f"{name}: {e}")
         if fehler:
             return startseite(fehler, 400)
         modus = request.form.get("modus", "pseudonym")
@@ -177,6 +184,7 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
         bericht = a.get("bericht")
         return render_template(
             "pruefen.html", a=a, gruppen=gruppen, uebrige=uebrige, namen=namen, nr=nr,
+            ocr_seiten=a["dateien"][nr].get("ocr_seiten") or [],
             ergebnis=vorschau(texte[nr], z, "ergebnis"), original=vorschau(texte[nr], z, "original"),
             ersetzungen=sum(zahl.values()), personen=personen,
             arten=ARTEN + (KONTEXT_ARTEN if anonym else []), anonym=anonym, bericht=bericht,

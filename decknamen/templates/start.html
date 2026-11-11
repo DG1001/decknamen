@@ -40,11 +40,12 @@
   </fieldset>
 
   <label class="ablage" for="dateien">
-    <input type="file" id="dateien" name="dateien" multiple required
-           accept=".md,.markdown,.txt,.docx,.pdf">
+    <input type="file" id="dateien" name="dateien" multiple required accept="{{ accept }}">
     <strong>Dateien hierher ziehen oder auswählen</strong>
-    <span class="grau">Markdown, Text, Word (.docx) und PDF mit Textebene. Mehrere Dateien bekommen
-      gemeinsame Platzhalter: dieselbe Person heißt überall gleich.</span>
+    <span class="grau">{% if mit_ocr %}Markdown, Text, Word (.docx), PDF und Bilder (PNG, JPG, TIFF);
+      eingescannte PDFs und Bilder liest die Texterkennung.{% else %}Markdown, Text, Word (.docx) und
+      PDF mit Textebene.{% endif %} Mehrere Dateien bekommen gemeinsame Platzhalter: dieselbe Person
+      heißt überall gleich.</span>
     <span class="auswahl" id="auswahl" aria-live="polite"></span>
   </label>
 

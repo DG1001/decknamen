@@ -153,3 +153,9 @@ def test_restrisiko_verwirft_zitate_aus_der_eigenen_anweisung():
              "grund": "g", "vorschlag": "v"},
             {"stelle": "[Person 1] kommt", "grund": "g", "vorschlag": "v"}]})
     assert [h["stelle"] for h in restrisiko("[Person 1] kommt.", frage)] == ["[Person 1] kommt"]
+
+
+def test_fund_ueber_zeilenumbruch_wird_angenommen():
+    roh = json.dumps({"funde": [{"text": "0731 4455-120", "typ": "TELEFON"}]})
+    funde = lies_antwort(roh, "oder unter 0731\n4455-120.", {"TELEFON"})
+    assert [f.text for f in funde] == ["0731 4455-120"]

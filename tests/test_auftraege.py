@@ -229,3 +229,29 @@ def test_pseudonymisieren_bleibt_wie_es_war(ablage):
     assert a["modus"] == "pseudonym" and a["typen"] == ["PERSON"] and a["bericht"] is None
     [(_, text)] = ergebnisse(ablage, a)
     assert text.startswith("Protokoll vom 14. Oktober 2026\n\nFrau Dr. [Person 1], unsere Teamleiterin")
+
+
+# ------------------------------------------------------------ Texterkennung
+
+from test_texterkennung import OCR, SCAN, _bild, _pdf, mit_tesseract  # noqa: E402
+
+
+@mit_tesseract
+def test_eingescannte_datei_wird_im_auftrag_gelesen(ablage):
+    a = ablage.neu([("scan.pdf", None, _pdf([_bild(SCAN)]))], ["PERSON"], False)
+    assert list((ablage.wurzel / a["id"] / "roh").iterdir())
+    verarbeiten(ablage, a["id"], FalschesLLM(personen=["Anna Mueller", "Peter Koch"]), ocr=OCR)
+    a = ablage.laden(a["id"])
+    assert a["stand"] == "pruefen" and a["dateien"][0]["ocr_seiten"] == [1]
+    assert a["dateien"][0]["zeichen"] > 30
+    assert not list((ablage.wurzel / a["id"] / "roh").iterdir())     # Rohdatei ist weg
+    [(_, text)] = ergebnisse(ablage, a)
+    assert "[Person 1] leitet die Runde." in text and "[Person 2] schreibt mit." in text
+
+
+def test_eingescannte_datei_ohne_texterkennung_bricht_mit_hinweis_ab(ablage):
+    a = ablage.neu([("scan.pdf", None, _pdf([_bild(SCAN)]))], ["PERSON"], False)
+    verarbeiten(ablage, a["id"], FalschesLLM(), ocr=None)
+    a = ablage.laden(a["id"])
+    assert a["stand"] == "fehler" and "tesseract-ocr" in a["fehler"]
+    assert list((ablage.wurzel / a["id"] / "roh").iterdir())           # für einen neuen Versuch

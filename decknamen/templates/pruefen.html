@@ -121,6 +121,11 @@
         <button type="button" data-zeige="original" aria-pressed="false">Original</button>
       </div>
     </div>
+    {% if ocr_seiten %}
+    <div class="hinweis ocr"><p>Per Texterkennung gelesen: Seite {{ ocr_seiten | join(', ') }}.
+      Erkennungsfehler können Namen verstümmeln („Mül1er“), die bleiben dann leicht stehen.
+      Im Ergebnis bitte besonders genau hinsehen.</p></div>
+    {% endif %}
     <pre class="blatt" id="ergebnis">{{ ergebnis }}</pre>
     <pre class="blatt" id="original" hidden>{{ original }}</pre>
     <p class="grau klein unter-blatt">

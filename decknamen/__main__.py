@@ -10,6 +10,7 @@ import sys
 from .auftraege import Ablage, Werkstatt
 from .belegung import Belegungsstelle
 from .llm import LLM, LLMFehler
+from .lesen import Texterkennung
 from .lokal import NichtLokal, pruefe_lokal
 from .web import app_bauen
 
@@ -45,6 +46,10 @@ def main(argv=None) -> int:
                    help="URL einer Belegungsstelle für ein geteiltes Modell (optional)")
     p.add_argument("--abschnitt", type=int, default=4000,
                    help="Zeichen je Anfrage an das Modell (Vorgabe: %(default)s)")
+    p.add_argument("--ocr-sprachen", default=umg("DECKNAMEN_OCR_SPRACHEN", "deu+eng"),
+                   help="Sprachen für die Texterkennung mit Tesseract (Vorgabe: %(default)s)")
+    p.add_argument("--ohne-ocr", action="store_true",
+                   help="Keine Texterkennung, auch wenn Tesseract installiert ist")
     p.add_argument("--mit-denken", action="store_true",
                    help="Denkmodus des Modells nicht abschalten (langsamer)")
     p.add_argument("--erlaube-entferntes-llm", action="store_true",
@@ -81,11 +86,19 @@ def main(argv=None) -> int:
     ablage = Ablage(a.daten)
     geraeumt = ablage.aufraeumen(a.aufbewahrung)
     belegung = Belegungsstelle(a.belegung) if a.belegung else None
-    werkstatt = Werkstatt(ablage, llm_bauen, belegung, a.abschnitt, a.aufbewahrung)
-    app = app_bauen(ablage, werkstatt, llm_lage, passwort=passwort, aufbewahrung_tage=a.aufbewahrung)
+    ocr = None if a.ohne_ocr else Texterkennung(sprachen=a.ocr_sprachen)
+    werkstatt = Werkstatt(ablage, llm_bauen, belegung, a.abschnitt, a.aufbewahrung, ocr=ocr)
+    app = app_bauen(ablage, werkstatt, llm_lage, passwort=passwort, aufbewahrung_tage=a.aufbewahrung,
+                    ocr=ocr)
 
     lage = llm_lage()
     print(f"decknamen: Modell {lage['modell'] or '(nicht erreichbar)'} unter {a.llm}", file=sys.stderr)
+    if ocr is None:
+        print("decknamen: Texterkennung abgeschaltet", file=sys.stderr)
+    elif ocr.verfuegbar:
+        print(f"decknamen: Texterkennung mit {ocr.version} ({ocr.sprachen})", file=sys.stderr)
+    else:
+        print("decknamen: Texterkennung nicht verfügbar (tesseract oder pdftoppm fehlt)", file=sys.stderr)
     if geraeumt:
         print(f"decknamen: {geraeumt} alte Aufträge gelöscht", file=sys.stderr)
     print(f"decknamen: Oberfläche unter http://{a.adresse}:{a.port}/", file=sys.stderr)

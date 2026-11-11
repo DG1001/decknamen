@@ -104,24 +104,33 @@ def _varianten(form: str) -> list[str]:
     return v
 
 
+_LEER = re.compile(r"\s+")
+
+
+def einheitlich(text: str) -> str:
+    """Leerraum vereinheitlichen: in PDFs und Scans brechen Namen über Zeilen um."""
+    return _LEER.sub(" ", text.strip())
+
+
 def _muster(formen) -> re.Pattern | None:
     formen = sorted(set(formen), key=lambda s: (-len(s), s))
     if not formen:
         return None
-    alt = "|".join(re.escape(f) for f in formen)
+    # Zwischen den Wörtern einer Schreibweise darf beliebiger Leerraum stehen.
+    alt = "|".join(r"\s+".join(re.escape(w) for w in f.split(" ")) for f in formen)
     return re.compile(r"(?<!\w)(%s)(s?)(?!\w)" % alt)
 
 
 def _erstes_auftreten(texte: list[str], formen: list[str]) -> dict[str, tuple[int, int]]:
-    """Position (Datei, Stelle) des ersten Treffers je Schreibweise."""
-    alias = {v: f for f in formen for v in _varianten(f)}
+    """Position (Datei, Stelle) des ersten Treffers je (vereinheitlichter) Schreibweise."""
+    alias = {v: f for f in map(einheitlich, formen) for v in _varianten(f)}
     m = _muster(alias)
     erste: dict[str, tuple[int, int]] = {}
     if m is None:
         return erste
     for i, t in enumerate(texte):
         for treffer in m.finditer(t):
-            f = alias[treffer.group(1)]
+            f = alias[einheitlich(treffer.group(1))]
             erste.setdefault(f, (i, treffer.start()))
     return erste
 
@@ -176,7 +185,8 @@ def _genitiv_abstreifen(funde: list[Fund]) -> list[Fund]:
 
 
 def zuordnen(funde: list[Fund], texte: list[str], anrede_weg: bool = False) -> Zuordnung:
-    aktive = [f for f in funde if f.aktiv and f.text.strip() and f.typ in TYPEN
+    aktive = [replace(f, text=einheitlich(f.text)) for f in funde
+              if f.aktiv and f.text.strip() and f.typ in TYPEN
               and not PLATZHALTER.fullmatch(f.text.strip())]
     aktive = _genitiv_abstreifen(aktive)
     erste = _erstes_auftreten(texte, [f.text for f in aktive])
@@ -225,7 +235,7 @@ def zuordnen(funde: list[Fund], texte: list[str], anrede_weg: bool = False) -> Z
 def ersetzen(text: str, z: Zuordnung) -> str:
     if z.muster is None:
         return text
-    return z.muster.sub(lambda m: z.form_zu_platzhalter[m.group(1)] + m.group(2), text)
+    return z.muster.sub(lambda m: z.form_zu_platzhalter[einheitlich(m.group(1))] + m.group(2), text)
 
 
 def stellen(text: str, z: Zuordnung):
@@ -233,7 +243,7 @@ def stellen(text: str, z: Zuordnung):
     if z.muster is None:
         return
     for m in z.muster.finditer(text):
-        yield m.start(1), m.end(1), m.group(1), z.form_zu_platzhalter[m.group(1)]
+        yield m.start(1), m.end(1), m.group(1), z.form_zu_platzhalter[einheitlich(m.group(1))]
 
 
 def zaehlen(texte: list[str], z: Zuordnung) -> dict[str, int]:
@@ -241,7 +251,7 @@ def zaehlen(texte: list[str], z: Zuordnung) -> dict[str, int]:
     zahl: dict[str, int] = {}
     for t in texte:
         for _, _, form, _ in stellen(t, z):
-            f = z.grundform.get(form, form)
+            f = z.grundform.get(einheitlich(form), form)
             zahl[f] = zahl.get(f, 0) + 1
     return zahl
 

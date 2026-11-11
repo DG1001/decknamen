@@ -189,6 +189,7 @@ legend { font-weight: 600; padding: 0; margin-bottom: .5rem; }
 .hinweis { border-left: 4px solid var(--linie); padding: .6rem 1rem; margin: 1rem 0; background: var(--blatt); }
 .hinweis.fehler { border-color: var(--fehler); background: var(--fehler-grund); }
 .hinweis p:last-child { margin: 0; }
+.hinweis.ocr { border-color: var(--t-adresse); max-width: 52rem; margin-top: 0; }
 
 .liste { max-width: 60rem; margin-top: 3rem; }
 table { border-collapse: collapse; width: 100%; background: var(--blatt); font-size: .95rem; }

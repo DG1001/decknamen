@@ -3,27 +3,117 @@
 Das Ergebnis ist immer reiner Text. Formatierung, eingebettete Bilder,
 Kommentare und Dokumenteigenschaften (Autor, Bearbeiter) bleiben dabei
 zurück -- sie würden sonst Namen am Pseudonymisieren vorbei tragen.
+
+Eingescannte PDFs und Bilder liest Tesseract, sofern installiert. Die
+Seiten gehen dafür nur in ein temporäres Verzeichnis (0700), das danach
+gelöscht wird.
 """
 from __future__ import annotations
 
 import io
 import pathlib
+import re
+import shutil
+import subprocess
+import tempfile
+from typing import Callable
 
-ENDUNGEN = (".md", ".markdown", ".txt", ".docx", ".pdf")
+BILDER = (".png", ".jpg", ".jpeg", ".tif", ".tiff")
+ENDUNGEN = (".md", ".markdown", ".txt", ".docx", ".pdf") + BILDER
+
+INSTALLATION = ("Für eingescannte PDFs und Bilder braucht decknamen Tesseract und Poppler, "
+                "etwa mit „sudo apt install tesseract-ocr tesseract-ocr-deu poppler-utils“.")
 
 
 class NichtLesbar(Exception):
     pass
 
 
-def lesen(name: str, daten: bytes) -> str:
+class Texterkennung:
+    """Tesseract für Bilder, pdftoppm zum Rendern von PDF-Seiten."""
+
+    def __init__(self, sprachen: str = "deu+eng", tesseract: str = "tesseract",
+                 pdftoppm: str = "pdftoppm", dpi: int = 300, zeitlimit: float = 180):
+        self.tesseract, self.pdftoppm = shutil.which(tesseract), shutil.which(pdftoppm)
+        self.verfuegbar = bool(self.tesseract and self.pdftoppm)
+        self.dpi, self.zeitlimit = dpi, zeitlimit
+        self.sprachen = sprachen
+        self.version = ""
+        if self.verfuegbar:
+            installiert = self._sprachen()
+            gewuenscht = [s for s in sprachen.split("+") if s in installiert]
+            self.sprachen = "+".join(gewuenscht) or next(
+                (s for s in installiert if s != "osd"), "eng")
+            self.version = self._lauf([self.tesseract, "--version"]).splitlines()[0]
+
+    def _lauf(self, befehl: list[str]) -> str:
+        try:
+            r = subprocess.run(befehl, capture_output=True, timeout=self.zeitlimit, check=True)
+        except subprocess.TimeoutExpired as e:
+            raise NichtLesbar("Die Texterkennung brauchte für eine Seite zu lange.") from e
+        except (subprocess.CalledProcessError, OSError) as e:
+            fehler = getattr(e, "stderr", b"") or b""
+            raise NichtLesbar(f"Texterkennung fehlgeschlagen: {fehler.decode(errors='replace')[:200]}") from e
+        return r.stdout.decode("utf-8", errors="replace")
+
+    def _sprachen(self) -> list[str]:
+        try:
+            zeilen = self._lauf([self.tesseract, "--list-langs"]).splitlines()
+        except NichtLesbar:
+            return []
+        return [z.strip() for z in zeilen[1:] if z.strip()]
+
+    def bild(self, pfad: pathlib.Path) -> str:
+        roh = self._lauf([self.tesseract, str(pfad), "stdout", "-l", self.sprachen, "--psm", "3"])
+        return _aufraeumen(roh)
+
+    def pdf_seite(self, pdf: pathlib.Path, seite: int, ordner: pathlib.Path) -> str:
+        ziel = ordner / f"seite-{seite}"
+        self._lauf([self.pdftoppm, "-r", str(self.dpi), "-gray", "-png", "-singlefile",
+                    "-f", str(seite), "-l", str(seite), str(pdf), str(ziel)])
+        return self.bild(ziel.with_suffix(".png"))
+
+
+def _aufraeumen(text: str) -> str:
+    """Trennstriche am Zeilenende zusammenziehen ("Proto-/koll"), Seitenwechsel als Leerzeile."""
+    text = re.sub(r"(\w)-\n([a-zäöüß])", r"\1\2", text.replace("\f", "\n\n"))
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _leer(seite: str) -> bool:
+    return len("".join(seite.split())) < 20
+
+
+def braucht_ocr(name: str, daten: bytes) -> bool:
+    """Ob die Datei (teilweise) nur über Texterkennung zu lesen ist."""
+    endung = pathlib.Path(name).suffix.lower()
+    if endung in BILDER:
+        return True
+    if endung != ".pdf":
+        return False
+    try:
+        return any(_leer(s) for s in _pdf_seiten(daten))
+    except NichtLesbar:
+        return False
+
+
+def lesen(name: str, daten: bytes, ocr: Texterkennung | None = None,
+          fortschritt: Callable[[int, int], None] | None = None) -> str:
+    return lesen_mit_info(name, daten, ocr, fortschritt)[0]
+
+
+def lesen_mit_info(name: str, daten: bytes, ocr: Texterkennung | None = None,
+                   fortschritt: Callable[[int, int], None] | None = None) -> tuple[str, list[int]]:
+    """(Text, Seiten, die per Texterkennung gelesen wurden)."""
     endung = pathlib.Path(name).suffix.lower()
     if endung in (".md", ".markdown", ".txt"):
-        return _text(daten)
+        return _text(daten), []
     if endung == ".docx":
-        return _docx(daten)
+        return _docx(daten), []
     if endung == ".pdf":
-        return _pdf(daten)
+        return _pdf(daten, ocr, fortschritt)
+    if endung in BILDER:
+        return _bilddatei(daten, endung, ocr, fortschritt)
     raise NichtLesbar(f"Dateityp {endung or '(ohne Endung)'} wird nicht unterstützt "
                       f"(möglich: {', '.join(ENDUNGEN)}). Datei: {name}")
 
@@ -115,19 +205,56 @@ def _docx(daten: bytes) -> str:
 
 # ------------------------------------------------------------------- PDF
 
-def _pdf(daten: bytes) -> str:
+def _pdf_seiten(daten: bytes) -> list[str]:
     from pypdf import PdfReader
     try:
         r = PdfReader(io.BytesIO(daten))
         if r.is_encrypted and not r.decrypt(""):
             raise NichtLesbar("Die PDF ist mit einem Passwort geschützt.")
-        seiten = [(p.extract_text() or "").strip() for p in r.pages]
+        return [(p.extract_text() or "").strip() for p in r.pages]
     except NichtLesbar:
         raise
     except Exception as e:
         raise NichtLesbar(f"PDF lässt sich nicht lesen: {e}") from e
+
+
+def _pdf(daten: bytes, ocr: Texterkennung | None, fortschritt) -> tuple[str, list[int]]:
+    seiten = _pdf_seiten(daten)
+    leere = [i for i, s in enumerate(seiten) if _leer(s)]
+    gelesen: list[int] = []
+    if leere and ocr is not None and ocr.verfuegbar:
+        with tempfile.TemporaryDirectory(prefix="decknamen-") as ordner:
+            o = pathlib.Path(ordner)
+            pdf = o / "eingang.pdf"
+            pdf.write_bytes(daten)
+            for k, i in enumerate(leere):
+                if fortschritt:
+                    fortschritt(k, len(leere))
+                seiten[i] = ocr.pdf_seite(pdf, i + 1, o)
+                gelesen.append(i + 1)
+        if fortschritt:
+            fortschritt(len(leere), len(leere))
     text = "\n\n".join(s for s in seiten if s)
-    if len("".join(text.split())) < 20:
-        raise NichtLesbar("Die PDF enthält keinen Text (eingescannt?). "
-                          "Texterkennung (OCR) gehört nicht zu decknamen.")
-    return text + "\n"
+    if _leer(text):
+        if gelesen:
+            raise NichtLesbar("Auch die Texterkennung hat in der PDF keinen Text gefunden.")
+        raise NichtLesbar("Die PDF enthält keinen Text (eingescannt?). " + INSTALLATION)
+    return text + "\n", gelesen
+
+
+def _bilddatei(daten: bytes, endung: str, ocr: Texterkennung | None, fortschritt) -> tuple[str, list[int]]:
+    if ocr is None or not ocr.verfuegbar:
+        raise NichtLesbar("Bilder lassen sich nur per Texterkennung lesen. " + INSTALLATION)
+    if fortschritt:
+        fortschritt(0, 1)
+    with tempfile.TemporaryDirectory(prefix="decknamen-") as ordner:
+        pfad = pathlib.Path(ordner) / ("eingang" + endung)
+        pfad.write_bytes(daten)
+        roh = ocr._lauf([ocr.tesseract, str(pfad), "stdout", "-l", ocr.sprachen, "--psm", "3"])
+    seiten = [s for s in roh.split("\f") if s.strip()] or [""]
+    text = _aufraeumen(roh)
+    if fortschritt:
+        fortschritt(1, 1)
+    if _leer(text):
+        raise NichtLesbar("Die Texterkennung hat im Bild keinen Text gefunden.")
+    return text + "\n", list(range(1, len(seiten) + 1))

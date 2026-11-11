@@ -1,4 +1,4 @@
-from decknamen.kern import Fund, zuordnen, ersetzen, zaehlen, zurueck
+from decknamen.kern import Fund, zuordnen, ersetzen, zaehlen, zurueck, stellen
 
 
 def _z(funde, *texte):
@@ -133,3 +133,18 @@ def test_anrede_und_titel_fallen_beim_anonymisieren_weg():
                                  "[Person 3] schaut zu, [Person 2] auch.")
     assert zaehlen([text], z) == {"Yıldız": 1, "Koch": 2, "Weber": 1}
     assert ersetzen(text, zuordnen(funde, [text])).startswith("Frau Dr. [Person 1]")
+
+
+def test_zeilenumbruch_im_namen_stoert_nicht():
+    text = "Teilnehmer: Sabine\nHartmann und Sabine Hartmann, Tel. 0731\n4455-120"
+    z = _z([Fund("Sabine Hartmann", "PERSON"), Fund("0731 4455-120", "TELEFON")], text)
+    assert ersetzen(text, z) == "Teilnehmer: [Person 1] und [Person 1], Tel. [Telefon 1]"
+    assert zaehlen([text], z) == {"Sabine Hartmann": 2, "0731 4455-120": 1}
+    assert [s[2] for s in stellen(text, z)][0] == "Sabine\nHartmann"
+
+
+def test_fund_mit_zeilenumbruch_vom_modell_wird_vereinheitlicht():
+    text = "Rückfragen an Sabine\nHartmann."
+    z = _z([Fund("Sabine\nHartmann", "PERSON")], text)
+    assert ersetzen(text, z) == "Rückfragen an [Person 1]."
+    assert z.gruppen[0].formen == ["Sabine Hartmann"]
