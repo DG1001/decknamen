@@ -1,0 +1,71 @@
+{% extends "basis.html" %}
+{% block inhalt %}
+<section class="auftakt">
+  <h1>Namen raus, bevor Texte rausgehen</h1>
+  <p class="beispiel" aria-label="Beispiel: Anna Müller wird zu [Person 1]">
+    Bis Freitag schickt
+    <span class="abdeckung"><span class="unten">Anna Müller</span><mark class="band t-person">[Person 1]</mark></span>
+    den Entwurf an
+    <span class="abdeckung spaeter"><span class="unten">p.koch@firma.de</span><mark class="band t-email">[E-Mail 1]</mark></span>.
+  </p>
+  <p class="einleitung">
+    decknamen ersetzt Namen, Kontaktdaten und Anschriften in Protokollen und Anweisungen durch
+    Platzhalter. Erkannt wird mit dem Sprachmodell im eigenen Netz. Die Dateien verlassen es nicht.
+  </p>
+</section>
+
+{% if fehler %}
+<div class="hinweis fehler" role="alert">
+  {% for f in fehler %}<p>{{ f }}</p>{% endfor %}
+</div>
+{% endif %}
+
+<form class="hochladen" method="post" action="{{ url_for('neu') }}" enctype="multipart/form-data">
+  <label class="ablage" for="dateien">
+    <input type="file" id="dateien" name="dateien" multiple required
+           accept=".md,.markdown,.txt,.docx,.pdf">
+    <strong>Dateien hierher ziehen oder auswählen</strong>
+    <span class="grau">Markdown, Text, Word (.docx) und PDF mit Textebene. Mehrere Dateien bekommen
+      gemeinsame Platzhalter: dieselbe Person heißt überall gleich.</span>
+    <span class="auswahl" id="auswahl" aria-live="polite"></span>
+  </label>
+
+  <fieldset class="arten">
+    <legend>Was ersetzt wird</legend>
+    {% for schluessel, name, hilfe in arten %}
+    <label class="wahl">
+      <input type="checkbox" name="typ" value="{{ schluessel }}" {% if schluessel in vorgewaehlt %}checked{% endif %}>
+      <span>{{ name }}{% if hilfe %} <span class="grau">{{ hilfe }}</span>{% endif %}</span>
+    </label>
+    {% endfor %}
+  </fieldset>
+
+  <label class="wahl nachkontrolle">
+    <input type="checkbox" name="nachkontrolle" value="1" checked>
+    <span>Ergebnis ein zweites Mal prüfen lassen <span class="grau">findet Übersehenes, dauert doppelt so lange</span></span>
+  </label>
+
+  <button class="knopf" type="submit">Pseudonymisieren</button>
+</form>
+
+<section class="liste">
+  <h2>Aufträge</h2>
+  {% if auftraege %}
+  <table>
+    <thead><tr><th>Angelegt</th><th>Dateien</th><th>Stand</th></tr></thead>
+    <tbody>
+    {% for a in auftraege %}
+      <tr>
+        <td><a href="{{ url_for('auftrag', auftrag_id=a.id) }}">{{ a.erstellt | zeit }}</a></td>
+        <td>{{ a.dateien | map(attribute='name') | join(', ') }}</td>
+        <td class="stand-{{ a.stand }}">{{ {'wartet': 'wartet', 'laeuft': 'läuft', 'pruefen': 'fertig zum Prüfen', 'fehler': 'Fehler'}[a.stand] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="grau">Noch keine Aufträge. Die erste Datei oben hineinziehen.</p>
+  {% endif %}
+  <p class="grau klein">Aufträge samt Text und Zuordnung werden nach {{ tage | round | int }} Tagen gelöscht, auf Wunsch sofort.</p>
+</section>
+{% endblock %}

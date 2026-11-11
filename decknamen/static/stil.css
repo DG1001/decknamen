@@ -1,0 +1,269 @@
+/* decknamen: ruhige Arbeitsfläche, ein lautes Element -- das Etikettenband,
+   das über dem Namen klebt. Jede Art von Angabe hat ihre Bandfarbe. */
+
+:root {
+  --tisch: #e8ebee;
+  --blatt: #ffffff;
+  --tinte: #1d2330;
+  --grau: #596271;
+  --linie: #cbd2da;
+  --linie-zart: #e3e7ec;
+  --aktion: #1f3f8f;
+  --aktion-tinte: #ffffff;
+  --fehler: #9b2c2c;
+  --fehler-grund: #fbeaea;
+
+  --t-person: #1f3f8f;
+  --t-email: #1d6a4e;
+  --t-telefon: #a23131;
+  --t-adresse: #d9a400;
+  --t-iban: #5b2c87;
+  --t-kennung: #374151;
+  --t-firma: #0f6b78;
+  --t-ort: #8a5512;
+  --t-sonstiges: #555b66;
+
+  --sans: system-ui, "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --schmal: "Arial Narrow", "Roboto Condensed", "Noto Sans Display", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tisch: #15181d;
+    --blatt: #1d2128;
+    --tinte: #e4e8ee;
+    --grau: #9aa3b2;
+    --linie: #333a46;
+    --linie-zart: #272c35;
+    --aktion: #7ea2e8;
+    --aktion-tinte: #0f1830;
+    --fehler: #f19a9a;
+    --fehler-grund: #3a1d1f;
+    --t-person: #3557b0;
+    --t-email: #23805f;
+    --t-telefon: #b84141;
+    --t-iban: #6e3aa0;
+    --t-kennung: #4b5563;
+    --t-firma: #13808f;
+    --t-ort: #9c6519;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--tisch);
+  color: var(--tinte);
+  font: 1rem/1.5 var(--sans);
+}
+
+a { color: var(--aktion); text-underline-offset: .15em; }
+:focus-visible { outline: 3px solid var(--aktion); outline-offset: 2px; }
+
+h1 { font-size: 2rem; line-height: 1.15; letter-spacing: -.01em; margin: 0 0 .5rem; }
+h2 { font-size: 1.2rem; line-height: 1.3; margin: 2rem 0 .75rem; }
+p { margin: 0 0 .75rem; }
+
+.seite { max-width: 76rem; margin: 0 auto; padding: 0 16px; }
+.grau { color: var(--grau); }
+.klein { font-size: .875rem; }
+
+/* ------------------------------------------------------------ Kopfzeile */
+
+.kopf { border-bottom: 1px solid var(--linie); background: var(--blatt); }
+.kopf-innen { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; align-items: center;
+              justify-content: space-between; padding-top: .65rem; padding-bottom: .65rem; }
+.marke { text-decoration: none; font-size: 1.15rem; }
+.modell { margin: 0; color: var(--grau); font-size: .875rem; overflow-wrap: anywhere; }
+.modell strong { color: var(--tinte); font-weight: 600; }
+.lampe { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+         background: var(--t-email); margin-right: .35rem; vertical-align: .05em; }
+.lampe.aus { background: var(--t-telefon); }
+
+main.seite { padding-top: 2rem; padding-bottom: 4rem; }
+
+/* --------------------------------------------------- Das Etikettenband */
+
+.band {
+  --farbe: var(--t-sonstiges);
+  display: inline-block;
+  background: var(--farbe);
+  color: #fff;
+  font-family: var(--schmal);
+  font-stretch: condensed;
+  font-weight: 700;
+  font-size: .86em;
+  line-height: 1.3;
+  letter-spacing: .03em;
+  padding: .02em .42em .06em;
+  border-radius: 2px;
+  white-space: nowrap;
+  /* geprägte Schrift: Licht von oben, Schatten nach unten */
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, .35), 0 1px 0 rgba(255, 255, 255, .22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), inset 0 -1px 0 rgba(0, 0, 0, .28);
+}
+.t-person { --farbe: var(--t-person); }
+.t-email { --farbe: var(--t-email); }
+.t-telefon { --farbe: var(--t-telefon); }
+.t-adresse { --farbe: var(--t-adresse); }
+.t-iban { --farbe: var(--t-iban); }
+.t-kennung { --farbe: var(--t-kennung); }
+.t-firma { --farbe: var(--t-firma); }
+.t-ort { --farbe: var(--t-ort); }
+.t-sonstiges { --farbe: var(--t-sonstiges); }
+.band.t-adresse { color: #1d1d1d; text-shadow: 0 1px 0 rgba(255, 255, 255, .35); }
+.marke .band { font-size: 1.05rem; padding: .05em .5em .1em; }
+
+/* Im Original: was ersetzt wird, unterstrichen in seiner Bandfarbe */
+.fund {
+  --farbe: var(--t-sonstiges);
+  background: color-mix(in srgb, var(--farbe) 16%, transparent);
+  color: inherit;
+  border-bottom: 2px solid var(--farbe);
+  padding: 0 .05em;
+}
+
+/* ------------------------------------------------------------ Startseite */
+
+.auftakt { max-width: 44rem; margin-bottom: 2rem; }
+.auftakt h1 { font-size: clamp(1.9rem, 4.5vw, 2.8rem); }
+.beispiel { font-family: var(--mono); font-size: .95rem; background: var(--blatt);
+            border-left: 3px solid var(--linie); padding: .7rem .9rem; margin: 1.25rem 0; }
+.einleitung { font-size: 1.075rem; max-width: 40rem; }
+
+/* Ein einziger Moment Bewegung: das Band klebt sich über den Namen. */
+/* Name und Band liegen im selben Rasterfeld; das Band ist so breit wie der Name. */
+.abdeckung { display: inline-grid; vertical-align: bottom; }
+.abdeckung > * { grid-area: 1 / 1; }
+.abdeckung .band { justify-self: stretch; text-align: center; font-size: .95em; line-height: 1.45;
+                   transform-origin: left center; animation: kleben .5s cubic-bezier(.2, .7, .2, 1) .9s both; }
+.abdeckung.spaeter .band { animation-delay: 1.5s; }
+@keyframes kleben { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .abdeckung .band { animation: none; }
+}
+
+.hochladen { max-width: 44rem; }
+.ablage {
+  display: grid; gap: .35rem; justify-items: start;
+  border: 2px dashed var(--linie); border-radius: 6px; background: var(--blatt);
+  padding: 1.5rem 1.25rem; cursor: pointer;
+}
+.ablage.drueber { border-color: var(--aktion); }
+.ablage input[type=file] { font: inherit; max-width: 100%; }
+.ablage strong { font-size: 1.1rem; }
+.auswahl { font-family: var(--mono); font-size: .875rem; overflow-wrap: anywhere; }
+.auswahl:empty { display: none; }
+
+fieldset { border: 0; padding: 0; margin: 1.5rem 0 0; min-width: 0; }
+legend { font-weight: 600; padding: 0; margin-bottom: .5rem; }
+.arten { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .35rem 1.25rem; }
+.arten legend { grid-column: 1 / -1; }
+.wahl { display: flex; gap: .5rem; align-items: baseline; }
+.wahl input { flex: none; accent-color: var(--aktion); translate: 0 .1em; }
+.nachkontrolle { margin: 1.25rem 0 1.5rem; }
+
+.knopf {
+  display: inline-block; font: 600 1rem/1.2 var(--sans); text-decoration: none; cursor: pointer;
+  background: var(--aktion); color: var(--aktion-tinte); border: 1px solid var(--aktion);
+  border-radius: 4px; padding: .6rem 1.1rem;
+}
+.knopf:hover { filter: brightness(1.08); }
+.knopf.leise { background: transparent; color: var(--aktion); }
+
+.hinweis { border-left: 4px solid var(--linie); padding: .6rem 1rem; margin: 1rem 0; background: var(--blatt); }
+.hinweis.fehler { border-color: var(--fehler); background: var(--fehler-grund); }
+.hinweis p:last-child { margin: 0; }
+
+.liste { max-width: 60rem; margin-top: 3rem; }
+table { border-collapse: collapse; width: 100%; background: var(--blatt); font-size: .95rem; }
+th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--linie-zart); vertical-align: top; }
+th { font-weight: 600; color: var(--grau); border-bottom-color: var(--linie); }
+td { overflow-wrap: anywhere; }
+.stand-fehler { color: var(--fehler); }
+.stand-pruefen { color: var(--t-email); }
+
+/* ---------------------------------------------------------------- Lauf */
+
+.lauf { max-width: 40rem; }
+progress {
+  appearance: none; width: 100%; height: .6rem; border: 0; border-radius: 3px;
+  background: var(--linie-zart); margin: 1.25rem 0 .75rem; overflow: hidden;
+}
+progress::-webkit-progress-bar { background: var(--linie-zart); }
+progress::-webkit-progress-value { background: var(--aktion); transition: width .4s; }
+progress::-moz-progress-bar { background: var(--aktion); }
+.reihe { display: flex; flex-wrap: wrap; gap: .75rem; }
+
+/* -------------------------------------------------------------- Prüfen */
+
+.pruefkopf { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between;
+             align-items: flex-end; margin-bottom: 1.5rem; }
+.pruefkopf > div:first-child { max-width: 44rem; }
+.ausgabe { display: grid; gap: .3rem; justify-items: end; }
+.ungespeichert { display: none; color: var(--fehler); font-size: .875rem; }
+body.geaendert .ungespeichert { display: block; }
+body.geaendert .ausgabe .knopf { opacity: .45; pointer-events: none; }
+
+.pruefen { display: grid; grid-template-columns: minmax(17rem, 25rem) minmax(0, 1fr); gap: 2rem; align-items: start; }
+.funde { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto;
+         padding-right: .25rem; }
+.funde h2 { margin-top: 0; }
+.gruppe { padding: .6rem 0; border-top: 1px solid var(--linie); }
+.gruppe-kopf { margin: 0 0 .3rem; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+.gruppe-kopf span { font-weight: 600; overflow-wrap: anywhere; }
+.gruppe ul { list-style: none; margin: 0; padding: 0 0 0 .2rem; }
+.gruppe li { padding: .1rem 0; }
+.gruppe .form { overflow-wrap: anywhere; }
+.abgewaehlt .gruppe-kopf { color: var(--grau); font-weight: 600; }
+.abgewaehlt .form { text-decoration: line-through; text-decoration-color: var(--grau); }
+
+.ergaenzen { display: grid; gap: .6rem; border-top: 1px solid var(--linie); padding-top: 1rem; margin-bottom: 1rem; }
+.ergaenzen label, .feld { display: grid; gap: .2rem; font-size: .9rem; color: var(--grau); }
+input[type=text], select, textarea {
+  font: 1rem/1.4 var(--sans); color: var(--tinte); background: var(--blatt);
+  border: 1px solid var(--linie); border-radius: 4px; padding: .45rem .55rem; width: 100%;
+}
+textarea { font-family: var(--mono); font-size: .9rem; resize: vertical; }
+input.uebernommen { border-color: var(--aktion); box-shadow: 0 0 0 2px color-mix(in srgb, var(--aktion) 25%, transparent); }
+
+.ansicht-leiste { display: flex; flex-wrap: wrap; gap: .5rem 1rem; justify-content: space-between;
+                  align-items: center; margin-bottom: .6rem; }
+.dateiname { margin: 0; font-family: var(--mono); font-size: .9rem; overflow-wrap: anywhere; }
+.dateien { display: flex; flex-wrap: wrap; gap: .25rem; }
+.dateien a { font-family: var(--mono); font-size: .85rem; padding: .25rem .5rem; border-radius: 3px;
+             text-decoration: none; border: 1px solid transparent; }
+.dateien a[aria-current] { border-color: var(--linie); background: var(--blatt); color: var(--tinte); }
+.umschalter { display: inline-flex; border: 1px solid var(--linie); border-radius: 4px; overflow: hidden; }
+.umschalter button { font: 600 .875rem/1 var(--sans); padding: .45rem .8rem; border: 0;
+                     background: var(--blatt); color: var(--grau); cursor: pointer; }
+.umschalter button[aria-pressed=true] { background: var(--tinte); color: var(--blatt); }
+
+.blatt {
+  margin: 0; background: var(--blatt); color: var(--tinte);
+  font: .9rem/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+  padding: 2rem clamp(1rem, 4vw, 2.75rem); border: 1px solid var(--linie);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 8px 24px -12px rgba(0, 0, 0, .18);
+  max-width: 52rem; min-height: 20rem;
+}
+.blatt .band { font-size: .84em; }
+.unter-blatt { margin-top: .6rem; }
+
+.nachher { max-width: 44rem; margin-top: 3rem; border-top: 1px solid var(--linie); }
+
+.zurueck { max-width: 52rem; }
+.zurueck form { display: grid; gap: .75rem; justify-items: start; margin-bottom: 1rem; }
+.zurueck .feld { width: 100%; }
+.zurueck .blatt { min-height: 0; margin-bottom: .75rem; }
+
+@media (max-width: 900px) {
+  .pruefen { grid-template-columns: minmax(0, 1fr); }
+  .funde { position: static; max-height: none; overflow: visible; order: 2; }
+  .ansicht { order: 1; }
+  .ausgabe { justify-items: start; }
+}

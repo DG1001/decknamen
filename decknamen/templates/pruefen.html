@@ -1,0 +1,123 @@
+{% extends "basis.html" %}
+{% block titel %}Prüfen: decknamen{% endblock %}
+{% block inhalt %}
+<section class="pruefkopf">
+  <div>
+    <h1>Prüfen, dann herunterladen</h1>
+    <p class="grau">
+      {{ ersetzungen }} Stellen in {{ namen | length }} Datei{{ 'en' if namen | length != 1 }} ersetzt,
+      {{ gruppen | length }} Platzhalter.
+      {% if a.modell %}Erkannt mit {{ a.modell }}{% if a.dauer_s is not none %} in {{ a.dauer_s }} s{% endif %}.{% endif %}
+      Was noch erkennbar ist, im Ergebnis markieren und unten ergänzen.
+    </p>
+  </div>
+  <div class="ausgabe">
+    {% if namen | length > 1 %}
+      <a class="knopf" href="{{ url_for('alle', auftrag_id=a.id) }}">Alle als ZIP herunterladen</a>
+    {% else %}
+      <a class="knopf" href="{{ url_for('datei', auftrag_id=a.id, nr=0) }}">Ergebnis herunterladen</a>
+    {% endif %}
+    <span class="ungespeichert">Erst die Änderungen übernehmen.</span>
+  </div>
+</section>
+
+{% if meldung %}<div class="hinweis fehler" role="alert"><p>{{ meldung }}</p></div>{% endif %}
+
+<div class="pruefen">
+  <form class="funde" id="funde" method="post" action="{{ url_for('funde', auftrag_id=a.id) }}">
+    <input type="hidden" name="datei" value="{{ nr }}">
+    <h2>Platzhalter</h2>
+    {% for g in gruppen %}
+    <div class="gruppe">
+      <p class="gruppe-kopf"><mark class="band t-{{ g.typ | lower }}">{{ g.ph }}</mark>
+        {% if g.typ == 'PERSON' or g.formen | length > 1 %}<span>{{ g.anzeige }}</span>{% endif %}</p>
+      <ul>
+      {% for f in g.formen %}
+        <li><label class="wahl">
+          <input type="checkbox" name="aktiv" value="{{ f.i }}" checked>
+          <span class="form">{{ f.text }}</span>
+          <span class="grau klein">{{ f.zahl }}×, {{ f.quelle }}</span>
+        </label></li>
+      {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <p class="grau">Nichts gefunden. Wenn das nicht stimmt, Begriffe unten von Hand ergänzen.</p>
+    {% endfor %}
+
+    {% if uebrige %}
+    <div class="gruppe abgewaehlt">
+      <p class="gruppe-kopf">Bleibt stehen</p>
+      <ul>
+      {% for f in uebrige %}
+        <li><label class="wahl">
+          <input type="checkbox" name="aktiv" value="{{ f.i }}">
+          <span class="form">{{ f.text }}</span>
+          <span class="grau klein">{{ TYPEN[f.typ] }}, {{ f.quelle }}</span>
+        </label></li>
+      {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <fieldset class="ergaenzen">
+      <legend>Begriff ergänzen</legend>
+      <label>Wortlaut <input type="text" name="neu_text" id="neu_text" autocomplete="off"
+             placeholder="im Text markieren oder eintippen"></label>
+      <label>Art
+        <select name="neu_typ" id="neu_typ">
+          {% for schluessel, name, _ in arten %}<option value="{{ schluessel }}">{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      {% if personen %}
+      <label>Gehört zu
+        <select name="neu_person">
+          <option value="">neue Person</option>
+          {% for g in personen %}<option value="{{ g.anzeige }}">{{ g.ph }} {{ g.anzeige }}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </fieldset>
+
+    <button class="knopf" type="submit">Änderungen übernehmen</button>
+  </form>
+
+  <section class="ansicht">
+    <div class="ansicht-leiste">
+      {% if namen | length > 1 %}
+      <nav class="dateien" aria-label="Dateien">
+        {% for n in namen %}
+          <a href="{{ url_for('auftrag', auftrag_id=a.id, datei=loop.index0) }}"
+             {% if loop.index0 == nr %}aria-current="page"{% endif %}>{{ n }}</a>
+        {% endfor %}
+      </nav>
+      {% else %}
+      <p class="dateiname">{{ namen[0] }}</p>
+      {% endif %}
+      <div class="umschalter" role="group" aria-label="Ansicht">
+        <button type="button" data-zeige="ergebnis" aria-pressed="true">Ergebnis</button>
+        <button type="button" data-zeige="original" aria-pressed="false">Original</button>
+      </div>
+    </div>
+    <pre class="blatt" id="ergebnis">{{ ergebnis }}</pre>
+    <pre class="blatt" id="original" hidden>{{ original }}</pre>
+    <p class="grau klein unter-blatt">
+      Heruntergeladen wird genau dieser Text als Markdown.
+      {% if namen | length > 1 %}<a href="{{ url_for('datei', auftrag_id=a.id, nr=nr) }}">Nur diese Datei herunterladen</a>.{% endif %}
+    </p>
+  </section>
+</div>
+
+<section class="nachher">
+  <h2>Später</h2>
+  <p>
+    <a href="{{ url_for('zurueck', auftrag_id=a.id) }}">Text mit Platzhaltern zurückübersetzen</a>,
+    zum Beispiel die Antwort eines externen Modells.
+    Die <a href="{{ url_for('zuordnung', auftrag_id=a.id) }}">Zuordnung als JSON</a> enthält die echten Namen
+    und bleibt im Haus.
+  </p>
+  <form method="post" action="{{ url_for('loeschen', auftrag_id=a.id) }}">
+    <button class="knopf leise" type="submit">Auftrag jetzt löschen</button>
+  </form>
+</section>
+{% endblock %}

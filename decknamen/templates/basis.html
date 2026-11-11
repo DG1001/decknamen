@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{% block titel %}decknamen{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='stil.css') }}">
+<link rel="icon" href="data:,">
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+<header class="kopf">
+  <div class="seite kopf-innen">
+    <a class="marke" href="{{ url_for('start') }}"><span class="band t-person">decknamen</span></a>
+    <p class="modell">
+      {% if lage and lage.fehler %}
+        <span class="lampe aus" aria-hidden="true"></span>
+        Sprachmodell unter {{ lage.basis }} nicht erreichbar
+      {% elif lage %}
+        <span class="lampe" aria-hidden="true"></span>
+        Lokales Modell <strong>{{ lage.modell }}</strong> unter {{ lage.basis }}
+      {% endif %}
+    </p>
+  </div>
+</header>
+<main class="seite">
+{% block inhalt %}{% endblock %}
+</main>
+</body>
+</html>

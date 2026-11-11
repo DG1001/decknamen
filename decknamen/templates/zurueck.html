@@ -1,0 +1,23 @@
+{% extends "basis.html" %}
+{% block titel %}Zurückübersetzen: decknamen{% endblock %}
+{% block inhalt %}
+<section class="zurueck">
+  <p><a href="{{ url_for('auftrag', auftrag_id=a.id) }}">Zurück zum Auftrag</a></p>
+  <h1>Platzhalter zurückübersetzen</h1>
+  <p class="einleitung">
+    Text mit Platzhaltern wie [Person 1] einfügen, etwa die Antwort eines externen Modells auf die
+    pseudonymisierten Unterlagen. Die Platzhalter werden durch die echten Angaben aus diesem Auftrag ersetzt.
+  </p>
+  <form method="post">
+    <label class="feld">Text mit Platzhaltern
+      <textarea name="text" rows="10" required>{{ eingabe }}</textarea>
+    </label>
+    <button class="knopf" type="submit">Zurückübersetzen</button>
+  </form>
+  {% if ausgabe %}
+  <h2>Ergebnis</h2>
+  <pre class="blatt" id="rueck">{{ ausgabe }}</pre>
+  <button class="knopf leise" type="button" data-kopiere="rueck">In die Zwischenablage</button>
+  {% endif %}
+</section>
+{% endblock %}

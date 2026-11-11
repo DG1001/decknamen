@@ -1,0 +1,24 @@
+{% extends "basis.html" %}
+{% block titel %}{{ 'Fehler' if a.stand == 'fehler' else 'Läuft' }}: decknamen{% endblock %}
+{% block inhalt %}
+<section class="lauf" id="lauf" data-stand-url="{{ url_for('stand', auftrag_id=a.id) }}" data-stand="{{ a.stand }}">
+  <h1>{% if a.stand == 'fehler' %}Abgebrochen{% elif a.stand == 'wartet' %}Wartet{% else %}Wird durchgesehen{% endif %}</h1>
+  <p class="grau">{{ a.dateien | map(attribute='name') | join(', ') }}</p>
+
+  {% if a.stand == 'fehler' %}
+    <div class="hinweis fehler" role="alert"><p>{{ a.fehler }}</p></div>
+    <div class="reihe">
+      <form method="post" action="{{ url_for('nochmal', auftrag_id=a.id) }}">
+        <button class="knopf" type="submit">Erneut versuchen</button>
+      </form>
+      <form method="post" action="{{ url_for('loeschen', auftrag_id=a.id) }}">
+        <button class="knopf leise" type="submit">Auftrag löschen</button>
+      </form>
+    </div>
+  {% else %}
+    <progress id="balken" max="100" value="{{ (a.anteil * 100) | round | int }}">{{ (a.anteil * 100) | round | int }} %</progress>
+    <p id="schritt">{{ a.schritt }}</p>
+    <p class="grau klein">Die Seite darf zu. Der Auftrag läuft weiter und steht danach in der Liste.</p>
+  {% endif %}
+</section>
+{% endblock %}
