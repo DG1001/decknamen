@@ -89,6 +89,13 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
             if not a or not hmac.compare_digest((a.password or "").encode(), passwort.encode()):
                 return ("Anmeldung nötig", 401, {"WWW-Authenticate": 'Basic realm="decknamen"'})
         if request.method == "POST":
+            # Formulare nur von der eigenen Seite. Moderne Browser sagen das selbst
+            # (Sec-Fetch-Site), sonst entscheidet die Herkunft. "Origin: null" gilt als
+            # fremd -- deshalb darf die Referrer-Policy nicht "no-referrer" sein, sonst
+            # schickt der Browser genau das zu jedem eigenen Formular.
+            seite = request.headers.get("Sec-Fetch-Site")
+            if seite and seite not in ("same-origin", "none"):
+                abort(403)
             herkunft = request.headers.get("Origin") or request.headers.get("Referer")
             if herkunft and urllib.parse.urlsplit(herkunft).netloc != request.host:
                 abort(403)
@@ -97,7 +104,7 @@ def app_bauen(ablage, werkstatt, llm_lage, passwort: str | None = None,
     def kopf(r):
         r.headers["Content-Security-Policy"] = CSP
         r.headers["X-Content-Type-Options"] = "nosniff"
-        r.headers["Referrer-Policy"] = "no-referrer"
+        r.headers["Referrer-Policy"] = "same-origin"      # nach außen geht nichts
         r.headers["Cache-Control"] = "no-store"
         return r
 

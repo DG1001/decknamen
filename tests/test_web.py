@@ -38,10 +38,10 @@ def umgebung(tmp_path):
     return app.test_client(), ablage
 
 
-def _hochladen(c, name="Protokoll.md", inhalt=TEXT, **felder):
+def _hochladen(c, name="Protokoll.md", inhalt=TEXT, headers=None, **felder):
     daten = {"dateien": (io.BytesIO(inhalt.encode()), name),
              "typ": ["PERSON", "EMAIL", "TELEFON"], "nachkontrolle": "1", **felder}
-    return c.post("/auftrag", data=daten, content_type="multipart/form-data")
+    return c.post("/auftrag", data=daten, content_type="multipart/form-data", headers=headers or {})
 
 
 def _auftrag_id(antwort):
@@ -236,3 +236,31 @@ def test_eingescannte_pdf_ohne_texterkennung_wird_beim_hochladen_erklaert(umgebu
     r = c.post("/auftrag", data={"dateien": (io.BytesIO(_pdf([_bild(SCAN)])), "scan.pdf"), "typ": ["PERSON"]},
                content_type="multipart/form-data")
     assert r.status_code == 400 and "tesseract-ocr" in r.get_data(as_text=True)
+
+
+# ------------------------------------------------- Herkunft wie im Browser
+
+def test_referrer_policy_laesst_dem_browser_seine_herkunft():
+    """Bei 'no-referrer' schickt der Browser zu jedem Formular 'Origin: null' --
+    dann hielt die Herkunftsprüfung jedes eigene Formular für fremd (11.11.2026)."""
+    from decknamen.web import app_bauen as bauen
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        ablage = Ablage(d)
+        c = bauen(ablage, SofortWerkstatt(ablage, None), lambda: {"basis": "x", "modell": "", "fehler": ""}).test_client()
+        r = c.get("/")
+        assert r.headers["Referrer-Policy"] == "same-origin"
+        assert 'content="no-referrer"' not in r.get_data(as_text=True)
+
+
+def test_formular_von_der_eigenen_seite_geht_durch(umgebung):
+    c, _ = umgebung
+    r = _hochladen(c, headers={"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"})
+    assert r.status_code == 303
+
+
+@pytest.mark.parametrize("kopf", [{"Origin": "null"}, {"Sec-Fetch-Site": "cross-site"},
+                                  {"Origin": "http://localhost", "Sec-Fetch-Site": "same-site"}])
+def test_formular_von_fremder_herkunft_wird_abgewiesen(umgebung, kopf):
+    c, _ = umgebung
+    assert _hochladen(c, headers=kopf).status_code == 403
